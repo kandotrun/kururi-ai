@@ -30,32 +30,57 @@ const downloadFile = async (url: string, dest: string, redirects = 0): Promise<v
   await fs.promises.mkdir(path.dirname(dest), { recursive: true });
   const file = fs.createWriteStream(dest);
   await new Promise<void>((resolve, reject) => {
-    https
-      .get(url, { headers: { 'User-Agent': 'kururi-ai-desktop' } }, res => {
+    const timeoutMs = 30000;
+    const cleanup = async () => {
+      file.destroy();
+      await fs.promises.unlink(dest).catch(() => undefined);
+    };
+    const fail = async (err: Error) => {
+      await cleanup();
+      reject(err);
+    };
+
+    const req = https.get(
+      url,
+      { headers: { 'User-Agent': 'kururi-ai-desktop' } },
+      res => {
         if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
           const loc = res.headers.location;
-          file.close();
-          fs.promises.unlink(dest).catch(() => undefined);
-          if (!loc) {
-            reject(new Error('Redirect with no location header'));
-            return;
-          }
-          downloadFile(loc, dest, redirects + 1)
-            .then(resolve)
+          res.destroy();
+          cleanup()
+            .then(() => {
+              if (!loc) {
+                reject(new Error('Redirect with no location header'));
+                return;
+              }
+              downloadFile(loc, dest, redirects + 1)
+                .then(resolve)
+                .catch(reject);
+            })
             .catch(reject);
           return;
         }
         if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`HTTP ${res.statusCode}`));
+          fail(new Error(`HTTP ${res.statusCode}`));
           return;
         }
+        res.on('error', err => void fail(err));
         res.pipe(file);
         file.on('finish', () => {
           file.close();
           resolve();
         });
-      })
-      .on('error', reject);
+      }
+    );
+
+    req.on('error', err => void fail(err));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('Request timeout'));
+    });
+    req.on('socket', socket => {
+      socket.setTimeout(timeoutMs);
+      socket.on('timeout', () => req.destroy(new Error('Socket timeout')));
+    });
   });
 };
 
