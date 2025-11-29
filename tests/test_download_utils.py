@@ -30,7 +30,10 @@ def test_sha256_file(tmp_path: Path):
     data = b"abc123"
     target = tmp_path / "file.bin"
     target.write_bytes(data)
-    assert sha256_file(target) == "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090"
+    assert (
+        sha256_file(target)
+        == "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090"
+    )
 
 
 def test_ensure_checkpoint_downloads_and_verifies(monkeypatch, tmp_path: Path):
