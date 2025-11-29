@@ -22,7 +22,7 @@ def load_model(
     model_name: str, checkpoint_path: Path, device: torch.device
 ) -> torch.nn.Module:
     model = timm.create_model(model_name, pretrained=False, num_classes=4)
-    state = torch.load(checkpoint_path, map_location=device)
+    state = torch.load(checkpoint_path, map_location=device, weights_only=True)
     cleaned_state = sanitize_state_dict(state)
     model.load_state_dict(cleaned_state)
     model.to(device)
