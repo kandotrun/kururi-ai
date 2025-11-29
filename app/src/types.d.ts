@@ -1,4 +1,4 @@
-import { PredictRequest, PredictStatus } from "./preload";
+import type { PredictRequest, PredictStatus } from "./preload";
 
 declare global {
   interface Window {
@@ -11,5 +11,3 @@ declare global {
     };
   }
 }
-
-export {};

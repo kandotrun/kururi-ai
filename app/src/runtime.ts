@@ -1,10 +1,10 @@
-import fs from "fs";
-import path from "path";
-import os from "os";
-import https from "https";
-import tar from "tar";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 import AdmZip from "adm-zip";
-import { spawn } from "child_process";
+import tar from "tar";
 
 const pythonBuilds: Record<string, { url: string; exe: string }> = {
   "darwin-arm64": {

@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { Play, FolderOpen, File as FileIcon, HardDrive, Cpu } from "lucide-react";
+import { Cpu, File as FileIcon, FolderOpen, HardDrive, Play } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
-import { Badge } from "./components/ui/badge";
 import { Switch } from "./components/ui/switch";
 import "./index.css";
 
 type Device = "cpu" | "mps" | "cuda";
+type LogEntry = { id: number; text: string };
 
 const devices: Array<{ value: Device; label: string }> = [
   { value: "cpu", label: "CPU" },
@@ -21,21 +22,29 @@ export const App = () => {
   const [outputDir, setOutputDir] = useState<string | null>(null);
   const [device, setDevice] = useState<Device>("cpu");
   const [skipBroken, setSkipBroken] = useState(false);
-  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logLines, setLogLines] = useState<LogEntry[]>([]);
+  const [nextLogId, setNextLogId] = useState(0);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
     const api = window.kururi;
     if (!api) return;
-    api.onLog((line) => setLogLines((prev) => [...prev, line]));
+    api.onLog((line) => {
+      setLogLines((prev) => [...prev, { id: nextLogId + 1, text: line }]);
+      setNextLogId((id) => id + 1);
+    });
     api.onStatus((status) => {
       setLogLines((prev) => [
         ...prev,
-        `Process exited code=${status.code} signal=${status.signal ?? "none"}`,
+        {
+          id: nextLogId + 1,
+          text: `Process exited code=${status.code} signal=${status.signal ?? "none"}`,
+        },
       ]);
+      setNextLogId((id) => id + 1);
       setRunning(false);
     });
-  }, []);
+  }, [nextLogId]);
 
   const handleChoose = async (type: "file" | "directory") => {
     const selected = await window.kururi.selectInput(type);
@@ -51,7 +60,8 @@ export const App = () => {
 
   const handleRun = async () => {
     if (!inputPath) {
-      setLogLines((prev) => [...prev, "Please select input first."]);
+      setLogLines((prev) => [...prev, { id: nextLogId + 1, text: "Please select input first." }]);
+      setNextLogId((id) => id + 1);
       return;
     }
     setLogLines([]);
@@ -63,11 +73,6 @@ export const App = () => {
       skipBroken,
     });
   };
-
-  const deviceLabel = useMemo(
-    () => devices.find((d) => d.value === device)?.label ?? device,
-    [device],
-  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-5 py-6 text-slate-900">
@@ -145,7 +150,7 @@ export const App = () => {
             {logLines.length === 0 ? (
               <div className="text-slate-500">Logs will appear here</div>
             ) : (
-              logLines.map((line, idx) => <div key={idx}>{line}</div>)
+              logLines.map((entry) => <div key={entry.id}>{entry.text}</div>)
             )}
           </div>
         </Card>

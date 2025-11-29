@@ -1,9 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, OpenDialogOptions } from "electron";
-import path from "path";
-import fs from "fs";
-import { spawn } from "child_process";
-import os from "os";
-import { PredictRequest, PredictStatus } from "./preload";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { BrowserWindow, type OpenDialogOptions, app, dialog, ipcMain } from "electron";
+import type { PredictRequest, PredictStatus } from "./preload";
 import { ensurePythonRuntime } from "./runtime";
 
 const isMac = process.platform === "darwin";
@@ -103,12 +103,16 @@ ipcMain.handle("run-predict", async (event, request: PredictRequest) => {
 
     child.stdout.on("data", (data) => {
       const lines = data.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach((line: string) => event.sender.send("predict-log", line));
+      for (const line of lines) {
+        event.sender.send("predict-log", line);
+      }
     });
 
     child.stderr.on("data", (data) => {
       const lines = data.toString().split(/\r?\n/).filter(Boolean);
-      lines.forEach((line: string) => event.sender.send("predict-log", `[stderr] ${line}`));
+      for (const line of lines) {
+        event.sender.send("predict-log", `[stderr] ${line}`);
+      }
     });
 
     child.on("close", (code, signal) => {
