@@ -8,15 +8,15 @@ import { spawn } from 'child_process';
 
 const pythonBuilds: Record<string, { url: string; exe: string }> = {
   'darwin-arm64': {
-    url: 'https://github.com/indygreg/python-build-standalone/releases/download/20241002/cpython-3.12.7+20241002-aarch64-apple-darwin-install_only.tar.gz',
+    url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20251120/cpython-3.10.19+20251120-aarch64-apple-darwin-install_only.tar.gz',
     exe: 'python/bin/python3'
   },
   'darwin-x64': {
-    url: 'https://github.com/indygreg/python-build-standalone/releases/download/20241002/cpython-3.12.7+20241002-x86_64-apple-darwin-install_only.tar.gz',
+    url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20251120/cpython-3.10.19+20251120-x86_64-apple-darwin-install_only.tar.gz',
     exe: 'python/bin/python3'
   },
   'win32-x64': {
-    url: 'https://github.com/indygreg/python-build-standalone/releases/download/20241002/cpython-3.12.7+20241002-amd64-pc-windows-msvc-install_only.zip',
+    url: 'https://github.com/astral-sh/python-build-standalone/releases/download/20251120/cpython-3.10.19+20251120-amd64-pc-windows-msvc-install_only.zip',
     exe: 'python/python.exe'
   }
 };
