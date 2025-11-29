@@ -21,15 +21,15 @@ uv pip install -e cli
 ```
 
 ## Model download
-- If `models/checkpoint_9.pth` is missing, the CLI downloads it from the configured URL.
+- If `models/checkpoint.pth` is missing, the CLI downloads it from the configured URL.
 - Set URL and hash via args or environment variables:
 ```bash
-export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint_9.pth"
+export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint.pth"
 export KURURI_MODEL_SHA256="<sha256sum>"
 # optional
 export KURURI_MODEL_TIMEOUT=1800
 ```
-- Default URL is a placeholder: `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint_9.pth`. Replace it after publishing your Release.
+- Default URL is a placeholder: `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint.pth`. Replace it after publishing your Release.
 
 ## Usage
 Single image:
@@ -52,14 +52,14 @@ uv run python cli/main.py predict \
 Supported extensions: jpg, jpeg, png, bmp, tif, tiff, webp.
 
 ### Checkpoint options
-- `--checkpoint` path (default `models/checkpoint_9.pth`)
+- `--checkpoint` path (default `models/checkpoint.pth`)
 - `--checkpoint-url` override download URL
 - `--checkpoint-sha256` integrity check
 - `--download-timeout` seconds (default 1800 or `KURURI_MODEL_TIMEOUT`)
 
 ## Publish the model to GitHub Release
-1. Compute hash: `shasum -a 256 models/checkpoint_9.pth`
-2. Create a Release and upload `checkpoint_9.pth` as an asset.
+1. Compute hash: `shasum -a 256 models/checkpoint.pth`
+2. Create a Release and upload `checkpoint.pth` as an asset.
 3. Update README, env examples, and default URL in code/CI with the Release URL and sha256.
 
 ## License

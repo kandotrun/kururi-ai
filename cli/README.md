@@ -2,7 +2,7 @@
 
 ## 前提
 - Python 3.12.9
-- ルート直下にモデルファイル `models/checkpoint_9.pth` が配置されていること
+- ルート直下にモデルファイル `models/checkpoint.pth` が配置されていること
 - 推論にGPUを使う場合は CUDA が利用可能な環境
 
 ## セットアップ
@@ -18,8 +18,8 @@ uv pip install -e cli
 ```bash
 uv run python cli/main.py predict --image <path_to_image> \
   [--device cpu|cuda:0] \
-  [--checkpoint models/checkpoint_9.pth] \
-  [--checkpoint-url https://example.com/checkpoint_9.pth] \
+  [--checkpoint models/checkpoint.pth] \
+  [--checkpoint-url https://example.com/checkpoint.pth] \
   [--checkpoint-sha256 <hash>] \
   [--download-timeout 1800] \
   [--model-name vit_large_patch16_224] \
@@ -32,7 +32,7 @@ uv run python cli/main.py predict --image <path_to_image> \
 uv run python cli/main.py predict \
   --dir <path_to_dir> \
   [--device cpu|cuda:0] \
-  [--checkpoint models/checkpoint_9.pth] \
+  [--checkpoint models/checkpoint.pth] \
   [--model-name vit_large_patch16_224] \
   [--save-rotated-dir outputs]
 ```
@@ -43,18 +43,18 @@ uv run python cli/main.py predict \
 - チェックポイントが無い場合、`--checkpoint-url` か環境変数 `KURURI_MODEL_URL` で指定したURLから自動で取得します。
 - 整合性を確認する場合は `--checkpoint-sha256` か `KURURI_MODEL_SHA256` を設定してください。
 - タイムアウトは `--download-timeout` か `KURURI_MODEL_TIMEOUT`（秒）で変更できます。
-- デフォルトURLは `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint_9.pth` になっているため、公開時に実際のRelease URLへ差し替えてください。
+- デフォルトURLは `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint.pth` になっているため、公開時に実際のRelease URLへ差し替えてください。
 
 ### 環境変数例
 ```bash
-export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint_9.pth"
+export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint.pth"
 export KURURI_MODEL_SHA256="<sha256sum>"
 ```
 
 ## Release へのモデル登録手順（例）
 1. チェックポイントのハッシュ取得  
-   `shasum -a 256 models/checkpoint_9.pth`
-2. GitHub Release を作成し、`checkpoint_9.pth` をアセットとしてアップロード。
+   `shasum -a 256 models/checkpoint.pth`
+2. GitHub Release を作成し、`checkpoint.pth` をアセットとしてアップロード。
 3. 上記URLとハッシュをREADMEと環境変数例に反映。
 ```
 

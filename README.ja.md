@@ -21,13 +21,13 @@ uv pip install -e cli
 ```
 
 ## モデル自動ダウンロード
-- `models/checkpoint_9.pth` が無い場合、指定URLから取得します。
+- `models/checkpoint.pth` が無い場合、指定URLから取得します。
 ```bash
-export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint_9.pth"
+export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1/checkpoint.pth"
 export KURURI_MODEL_SHA256="<sha256sum>"
 export KURURI_MODEL_TIMEOUT=1800   # 任意
 ```
-- デフォルトURLはプレースホルダ `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint_9.pth` なので、公開後に実URLへ置き換えてください。
+- デフォルトURLはプレースホルダ `https://github.com/OWNER/REPO/releases/download/v0.1/checkpoint.pth` なので、公開後に実URLへ置き換えてください。
 
 ## 使い方
 単一画像:
@@ -50,14 +50,14 @@ uv run python cli/main.py predict \
 対応拡張子: jpg, jpeg, png, bmp, tif, tiff, webp。
 
 ### チェックポイント関連オプション
-- `--checkpoint` 保存先パス（既定 `models/checkpoint_9.pth`）
+- `--checkpoint` 保存先パス（既定 `models/checkpoint.pth`）
 - `--checkpoint-url` ダウンロードURL
 - `--checkpoint-sha256` 整合性検証用ハッシュ
 - `--download-timeout` タイムアウト秒（既定 1800 または `KURURI_MODEL_TIMEOUT`）
 
 ## GitHub Release への登録手順
-1. ハッシュ取得: `shasum -a 256 models/checkpoint_9.pth`
-2. Releaseを作成し、アセットとして `checkpoint_9.pth` をアップロード。
+1. ハッシュ取得: `shasum -a 256 models/checkpoint.pth`
+2. Releaseを作成し、アセットとして `checkpoint.pth` をアップロード。
 3. READMEと環境変数例、コード内のデフォルトURLを実URLとsha256に更新。
 
 ## ライセンス
