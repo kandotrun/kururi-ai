@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Directory to save corrected images when using --dir",
     )
+    predict_parser.add_argument(
+        "--skip-broken",
+        action="store_true",
+        help="Skip unreadable images instead of aborting",
+    )
 
     return parser
 
@@ -116,6 +121,7 @@ def run_directory(
     output_root: Optional[Path],
     model: torch.nn.Module,
     device: torch.device,
+    skip_broken: bool,
 ) -> None:
     files = list_image_files(root)
     if len(files) == 0:
@@ -125,17 +131,26 @@ def run_directory(
         save_path = None
         if output_root is not None:
             save_path = output_root / path.relative_to(root)
-        rotation_class, probabilities = predict_with_model(
-            image_path=path,
-            model=model,
-            device=device,
-            save_rotated=save_path,
-        )
-        angle = angle_from_class(rotation_class)
-        prob_str = " ".join(
-            f"class_{idx}:{prob.item():.4f}" for idx, prob in enumerate(probabilities)
-        )
-        print(f"{path}: rotation_class={rotation_class} angle_ccw={angle} {prob_str}")
+        try:
+            rotation_class, probabilities = predict_with_model(
+                image_path=path,
+                model=model,
+                device=device,
+                save_rotated=save_path,
+            )
+            angle = angle_from_class(rotation_class)
+            prob_str = " ".join(
+                f"class_{idx}:{prob.item():.4f}"
+                for idx, prob in enumerate(probabilities)
+            )
+            print(
+                f"{path}: rotation_class={rotation_class} angle_ccw={angle} {prob_str}"
+            )
+        except Exception as e:  # noqa: BLE001
+            if skip_broken:
+                print(f"{path}: skipped ({e})")
+                continue
+            raise
     if output_root is not None:
         print(f"rotated_images_saved_under={output_root}")
 
@@ -175,6 +190,7 @@ def main() -> None:
                 output_root=output_root,
                 model=model,
                 device=device,
+                skip_broken=args.skip_broken,
             )
 
 

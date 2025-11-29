@@ -39,6 +39,14 @@ uv run python cli/main.py predict \
 
 `--save-rotated-dir` を指定すると、入力ディレクトリからの相対パスで補正画像を保存します。
 
+壊れた画像をスキップしたい場合:
+```bash
+uv run python cli/main.py predict \
+  --dir <path_to_dir> \
+  --save-rotated-dir <path_to_dir> \
+  --skip-broken
+```
+
 ## モデル自動ダウンロード
 - チェックポイントが無い場合、`--checkpoint-url` か環境変数 `KURURI_MODEL_URL` で指定したURLから自動で取得します。
 - 整合性を確認する場合は `--checkpoint-sha256` か `KURURI_MODEL_SHA256` を設定してください。

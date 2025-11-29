@@ -71,6 +71,15 @@ uv run python cli/main.py predict \
   --device cpu
 ```
 
+壊れた画像をスキップして処理を継続したい場合:
+
+```bash
+uv run python cli/main.py predict \
+  --dir /path/to/images \
+  --save-rotated-dir /path/to/images \
+  --skip-broken
+```
+
 サンプル入力と補正結果（サムネイル表示）:
 
 | # | 入力                                                               | 補正後出力                                                                 |
