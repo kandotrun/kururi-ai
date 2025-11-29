@@ -22,13 +22,6 @@ const pythonExecutable = async (): Promise<string> => {
   return candidates[0];
 };
 
-const cliEntry = (): string => {
-  const packagedPath = path.join(process.resourcesPath, 'cli', 'main.py');
-  if (fs.existsSync(packagedPath)) return packagedPath;
-  const devPath = path.resolve(__dirname, '..', '..', 'cli', 'main.py');
-  return devPath;
-};
-
 const createWindow = (): void => {
   const win = new BrowserWindow({
     width: 900,
@@ -71,7 +64,7 @@ ipcMain.handle('select-output-dir', async () => {
 
 const buildArgs = (request: PredictRequest): string[] => {
   const stats = fs.statSync(request.inputPath);
-  const args: string[] = [cliEntry(), 'predict'];
+  const args: string[] = ['-m', 'cli.main', 'predict'];
   if (stats.isDirectory()) {
     args.push('--dir', request.inputPath);
     if (request.outputDir) args.push('--save-rotated-dir', request.outputDir);
@@ -88,8 +81,14 @@ ipcMain.handle('run-predict', async (event, request: PredictRequest) => {
   const pythonPath = await pythonExecutable();
   const args = buildArgs(request);
   const child = spawn(pythonPath, args, {
-    cwd: path.resolve(__dirname, '..', '..'),
-    env: { ...process.env, PYTHONUNBUFFERED: '1' }
+    cwd: isDev ? path.resolve(__dirname, '..', '..') : process.resourcesPath,
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PYTHONPATH: isDev
+        ? path.resolve(__dirname, '..', '..')
+        : process.resourcesPath
+    }
   });
 
   child.on('error', err => {
