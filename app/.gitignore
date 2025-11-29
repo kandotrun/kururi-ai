@@ -1,6 +1,5 @@
 node_modules
 .dist
 dist
-runtime
 *.log
 .DS_Store
