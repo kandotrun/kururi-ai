@@ -101,5 +101,4 @@ uv run python cli/main.py predict \
     - Twitter: https://x.com/yuki_arano
     - GitHub: https://github.com/ObuchiYuki
     - 元ツイート: https://x.com/yuki_arano/status/1788051297108902073
-    -
-    iOSアプリ: https://apps.apple.com/jp/app/ai%E3%81%8C%E5%86%99%E7%9C%9F%E3%81%AE%E5%90%91%E3%81%8D%E3%82%92%E4%BF%AE%E6%AD%A3-%E3%81%8F%E3%82%8B%E3%82%8Aai/id6480589907
+    - iOSアプリ: https://apps.apple.com/jp/app/ai%E3%81%8C%E5%86%99%E7%9C%9F%E3%81%AE%E5%90%91%E3%81%8D%E3%82%92%E4%BF%AE%E6%AD%A3-%E3%81%8F%E3%82%8B%E3%82%8Aai/id6480589907
