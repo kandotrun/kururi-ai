@@ -92,6 +92,12 @@ ipcMain.handle('run-predict', async (event, request: PredictRequest) => {
     env: { ...process.env, PYTHONUNBUFFERED: '1' }
   });
 
+  child.on('error', err => {
+    event.sender.send('predict-log', `[spawn error] ${err.message}`);
+    const status: PredictStatus = { kind: 'exit', code: -1, signal: null };
+    event.sender.send('predict-status', status);
+  });
+
   child.stdout.on('data', data => {
     const lines = data.toString().split(/\r?\n/).filter(Boolean);
     lines.forEach((line: string) => event.sender.send('predict-log', line));
