@@ -1,0 +1,84 @@
+{
+  "name": "kururi-ai-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "license": "MIT",
+  "scripts": {
+    "dev": "npm-run-all -p watch:ts watch:renderer start:electron",
+    "start:electron": "cross-env NODE_ENV=development electron .",
+    "watch:ts": "tsc --watch --project tsconfig.json",
+    "watch:renderer": "vite build --watch",
+    "build:ts": "tsc --project tsconfig.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:ts && npm run build:renderer && electron-builder",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx,html}\""
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "1.0.2",
+    "@radix-ui/react-switch": "1.0.3",
+    "adm-zip": "0.5.12",
+    "class-variance-authority": "0.7.0",
+    "electron": "28.3.0",
+    "lucide-react": "0.469.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwind-merge": "2.2.1",
+    "tailwindcss-animate": "1.0.7",
+    "tar": "6.2.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "20.10.8",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/tar": "^6.1.13",
+    "@typescript-eslint/eslint-plugin": "6.16.0",
+    "@typescript-eslint/parser": "6.16.0",
+    "@vitejs/plugin-react": "4.2.1",
+    "autoprefixer": "10.4.16",
+    "cross-env": "7.0.3",
+    "electron-builder": "24.13.3",
+    "eslint": "8.56.0",
+    "npm-run-all": "4.1.5",
+    "postcss": "8.4.32",
+    "prettier": "3.1.1",
+    "tailwindcss": "3.4.1",
+    "ts-node": "10.9.2",
+    "typescript": "5.3.3",
+    "vite": "5.0.10"
+  },
+  "build": {
+    "appId": "com.kururi.ai.desktop",
+    "productName": "Kururi AI",
+    "files": [
+      "dist/**/*",
+      "../models/**",
+      "../cli/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.photography"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "runtime/",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  }
+}
