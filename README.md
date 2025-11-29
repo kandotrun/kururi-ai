@@ -51,6 +51,14 @@ uv run python cli/main.py predict \
 ```
 Supported extensions: jpg, jpeg, png, bmp, tif, tiff, webp.
 
+Try with bundled samples (recursive):
+```bash
+uv run python cli/main.py predict \
+  --dir samples \
+  --save-rotated-dir samples_out \
+  --device cpu
+```
+
 ### Checkpoint options
 - `--checkpoint` path (default `models/kururi-orient-v1.pth`)
 - `--checkpoint-url` override download URL

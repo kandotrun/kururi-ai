@@ -49,6 +49,14 @@ uv run python cli/main.py predict \
 ```
 対応拡張子: jpg, jpeg, png, bmp, tif, tiff, webp。
 
+同梱サンプルで試す（再帰処理）:
+```bash
+uv run python cli/main.py predict \
+  --dir samples \
+  --save-rotated-dir samples_out \
+  --device cpu
+```
+
 ### チェックポイント関連オプション
 - `--checkpoint` 保存先パス（既定 `models/kururi-orient-v1.pth`）
 - `--checkpoint-url` ダウンロードURL
