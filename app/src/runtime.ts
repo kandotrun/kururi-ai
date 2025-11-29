@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
-import { pipeline } from 'stream/promises';
+import tar from 'tar';
 import tar from 'tar';
 import AdmZip from 'adm-zip';
 import { spawn } from 'child_process';
