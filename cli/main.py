@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     predict_parser.add_argument(
         "--checkpoint",
-        default="models/checkpoint.pth",
+        default="models/kururi-orient-v1.pth",
         type=str,
         help="Path to model checkpoint",
     )
