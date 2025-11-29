@@ -1,0 +1,22 @@
+[project]
+name = "cli"
+version = "0.1.0"
+description = "くるりAIのCLIバージョンです。"
+readme = "README.md"
+requires-python = ">=3.12.9"
+dependencies = [
+    "torch>=2.3.0",
+    "torchvision>=0.18.0",
+    "timm>=0.9.16",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.4.0",
+    "pytest>=8.3.0",
+]
+
+[tool.setuptools]
+packages = ["cli"]
+package-dir = { "cli" = "." }
