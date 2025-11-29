@@ -78,39 +78,53 @@ const buildArgs = (request: PredictRequest): string[] => {
 };
 
 ipcMain.handle('run-predict', async (event, request: PredictRequest) => {
-  const pythonPath = await pythonExecutable();
-  const args = buildArgs(request);
-  const child = spawn(pythonPath, args, {
-    cwd: isDev ? path.resolve(__dirname, '..', '..') : process.resourcesPath,
-    env: {
-      ...process.env,
-      PYTHONUNBUFFERED: '1',
-      PYTHONPATH: isDev
-        ? path.resolve(__dirname, '..', '..')
-        : process.resourcesPath
-    }
-  });
+  let pythonPath: string | undefined;
+  try {
+    pythonPath = await pythonExecutable();
+    const args = buildArgs(request);
+    const child = spawn(pythonPath, args, {
+      cwd: isDev ? path.resolve(__dirname, '..', '..') : process.resourcesPath,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        PYTHONPATH: isDev
+          ? path.resolve(__dirname, '..', '..')
+          : process.resourcesPath
+      }
+    });
 
-  child.on('error', err => {
-    event.sender.send('predict-log', `[spawn error] ${err.message}`);
+    child.on('error', err => {
+      event.sender.send(
+        'predict-log',
+        `[spawn error] ${err.message} (python=${pythonPath ?? 'unknown'})`
+      );
+      const status: PredictStatus = { kind: 'exit', code: -1, signal: null };
+      event.sender.send('predict-status', status);
+    });
+
+    child.stdout.on('data', data => {
+      const lines = data.toString().split(/\r?\n/).filter(Boolean);
+      lines.forEach((line: string) => event.sender.send('predict-log', line));
+    });
+
+    child.stderr.on('data', data => {
+      const lines = data.toString().split(/\r?\n/).filter(Boolean);
+      lines.forEach((line: string) =>
+        event.sender.send('predict-log', `[stderr] ${line}`),
+      );
+    });
+
+    child.on('close', (code, signal) => {
+      const status: PredictStatus = { kind: 'exit', code: code ?? -1, signal: signal ?? null };
+      event.sender.send('predict-status', status);
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    event.sender.send(
+      'predict-log',
+      `[python setup error] ${message}${pythonPath ? ` (python=${pythonPath})` : ''}`
+    );
     const status: PredictStatus = { kind: 'exit', code: -1, signal: null };
     event.sender.send('predict-status', status);
-  });
-
-  child.stdout.on('data', data => {
-    const lines = data.toString().split(/\r?\n/).filter(Boolean);
-    lines.forEach((line: string) => event.sender.send('predict-log', line));
-  });
-
-  child.stderr.on('data', data => {
-    const lines = data.toString().split(/\r?\n/).filter(Boolean);
-    lines.forEach((line: string) =>
-      event.sender.send('predict-log', `[stderr] ${line}`),
-    );
-  });
-
-  child.on('close', (code, signal) => {
-    const status: PredictStatus = { kind: 'exit', code: code ?? -1, signal: signal ?? null };
-    event.sender.send('predict-status', status);
-  });
+  }
 });

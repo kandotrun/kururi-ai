@@ -124,9 +124,7 @@ export const ensurePythonRuntime = async ({ resourcesPath }: EnsureOptions): Pro
   const tmpArchive = path.join(os.tmpdir(), `kururi-python-${Date.now()}${ext}`);
   await downloadFile(build.url, tmpArchive);
   await extract(tmpArchive, runtimeDir);
-  fs.unlink(tmpArchive, () => {
-    /* noop */
-  });
+  await fs.promises.unlink(tmpArchive).catch(() => undefined);
 
   if (!fs.existsSync(pythonPath)) return null;
 
