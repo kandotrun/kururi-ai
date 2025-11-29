@@ -59,3 +59,6 @@ uv run python cli/main.py predict \
 1. ハッシュ取得: `shasum -a 256 models/checkpoint_9.pth`
 2. Releaseを作成し、アセットとして `checkpoint_9.pth` をアップロード。
 3. READMEと環境変数例、コード内のデフォルトURLを実URLとsha256に更新。
+
+## ライセンス
+- コードと同梱モデルは MIT ライセンスで提供します。`LICENSE` を参照してください。

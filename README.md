@@ -62,5 +62,8 @@ Supported extensions: jpg, jpeg, png, bmp, tif, tiff, webp.
 2. Create a Release and upload `checkpoint_9.pth` as an asset.
 3. Update README, env examples, and default URL in code/CI with the Release URL and sha256.
 
+## License
+- Code and packaged model are released under the MIT License. See `LICENSE`.
+
 ## Japanese documentation
 See `README.ja.md` for the Japanese version.
