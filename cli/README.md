@@ -64,7 +64,6 @@ export KURURI_MODEL_SHA256="<sha256sum>"
    `shasum -a 256 models/kururi-orient-v1.pth`
 2. GitHub Release を作成し、`kururi-orient-v1.pth` をアセットとしてアップロード。
 3. 上記URLとハッシュをREADMEと環境変数例に反映。
-```
 
 ### 出力例
 ```
