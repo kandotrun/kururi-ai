@@ -3,7 +3,6 @@ import path from 'path';
 import os from 'os';
 import https from 'https';
 import tar from 'tar';
-import tar from 'tar';
 import AdmZip from 'adm-zip';
 import { spawn } from 'child_process';
 
@@ -73,14 +72,20 @@ const extract = async (archive: string, targetDir: string): Promise<void> => {
   }
 };
 
-const requirementsPath = (resourcesPath: string) =>
-  path.join(resourcesPath, 'runtime', 'requirements-runtime.txt');
+const requirementsPath = (resourcesPath: string): string | null => {
+  const candidates = [
+    path.join(resourcesPath, 'runtime', 'requirements-runtime.txt'),
+    path.resolve(__dirname, '..', 'runtime', 'requirements-runtime.txt'),
+    path.resolve(process.cwd(), 'runtime', 'requirements-runtime.txt')
+  ];
+  return candidates.find(p => fs.existsSync(p)) ?? null;
+};
 
 const ensureDeps = async (pythonPath: string, resourcesPath: string): Promise<void> => {
   const marker = path.join(resourcesPath, 'runtime', '.deps_installed');
   if (fs.existsSync(marker)) return;
   const reqPath = requirementsPath(resourcesPath);
-  if (!fs.existsSync(reqPath)) return;
+  if (!reqPath) return;
   const install = (args: string[]) =>
     new Promise<void>((resolve, reject) => {
       const proc = spawn(pythonPath, args, { stdio: 'inherit' });
