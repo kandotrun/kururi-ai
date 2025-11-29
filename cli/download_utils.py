@@ -35,6 +35,11 @@ def download_file(url: str, dest: Path, timeout: int) -> None:
                         f"downloading {dest.name}: {percent}% ({downloaded}/{total} bytes)",
                         end="\r",
                     )
+        if total and downloaded != total:
+            temp_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"incomplete download: expected {total} bytes, got {downloaded}"
+            )
         if total:
             print(f"downloading {dest.name}: 100% ({downloaded}/{total} bytes)")
         temp_path.replace(dest)
