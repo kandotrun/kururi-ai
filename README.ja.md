@@ -57,6 +57,16 @@ uv run python cli/main.py predict \
   --device cpu
 ```
 
+サンプル入力と補正結果（サムネイル表示）:
+
+| # | 入力 | 補正後出力 |
+|---|------|------------|
+| 1 | <img src="samples/sample1.webp" width="180" alt="sample1 input"> | <img src="samples/out/sample1.webp" width="180" alt="sample1 output"> |
+| 2 | <img src="samples/sample2.webp" width="180" alt="sample2 input"> | <img src="samples/out/sample2.webp" width="180" alt="sample2 output"> |
+| 3 | <img src="samples/sample3.webp" width="180" alt="sample3 input"> | <img src="samples/out/sample3.webp" width="180" alt="sample3 output"> |
+| 4 | <img src="samples/sample4.webp" width="180" alt="sample4 input"> | <img src="samples/out/sample4.webp" width="180" alt="sample4 output"> |
+| 5 | <img src="samples/sample5.jpg" width="180" alt="sample5 input"> | <img src="samples/out/sample5.jpg" width="180" alt="sample5 output"> |
+
 ### チェックポイント関連オプション
 - `--checkpoint` 保存先パス（既定 `models/kururi-orient-v1.pth`）
 - `--checkpoint-url` ダウンロードURL
