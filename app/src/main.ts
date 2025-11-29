@@ -88,7 +88,9 @@ ipcMain.handle("run-predict", async (event, request: PredictRequest) => {
       env: {
         ...process.env,
         PYTHONUNBUFFERED: "1",
-        PYTHONPATH: isDev ? path.resolve(__dirname, "..", "..") : process.resourcesPath,
+        PYTHONPATH: isDev
+          ? path.resolve(__dirname, "..", "..")
+          : path.join(process.resourcesPath, "cli"),
       },
     });
 
