@@ -35,9 +35,7 @@ const downloadFile = async (url: string, dest: string, redirects = 0): Promise<v
         if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
           const loc = res.headers.location;
           file.close();
-          fs.unlink(dest, () => {
-            /* noop */
-          });
+          fs.promises.unlink(dest).catch(() => undefined);
           if (!loc) {
             reject(new Error('Redirect with no location header'));
             return;
