@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kururi AI Desktop</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 16px; background: #0f172a; color: #e2e8f0; }
+      h1 { margin-top: 0; }
+      .panel { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+      label { display: block; margin-bottom: 8px; }
+      button { cursor: pointer; padding: 10px 14px; border-radius: 10px; border: none; background: #22d3ee; color: #0f172a; font-weight: 700; }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #1f2937; background: #0b1224; color: #e2e8f0; }
+      select { padding: 8px; border-radius: 8px; border: 1px solid #1f2937; background: #0b1224; color: #e2e8f0; }
+      .log { background: #0b1224; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; height: 220px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; }
+      .badge { padding: 4px 8px; border-radius: 999px; background: #1f2937; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Kururi AI Desktop</h1>
+    <div class="panel">
+      <label>Input</label>
+      <div class="row">
+        <button id="choose-file">Select File</button>
+        <button id="choose-dir">Select Directory</button>
+        <span class="badge" id="input-label">Not selected</span>
+      </div>
+    </div>
+    <div class="panel">
+      <label>Output</label>
+      <div class="row">
+        <button id="choose-output">Select Output Directory</button>
+        <span class="badge" id="output-label">In-place</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <label for="device">Device</label>
+        <select id="device">
+          <option value="cpu">cpu</option>
+          <option value="mps">mps (macOS)</option>
+          <option value="cuda">cuda (Windows/NVIDIA)</option>
+        </select>
+        <label class="row" style="gap:4px; align-items:center;">
+          <input type="checkbox" id="skip-broken" /> skip broken files
+        </label>
+      </div>
+    </div>
+    <div class="panel">
+      <button id="run">Run</button>
+    </div>
+    <div class="panel">
+      <label>Log</label>
+      <div class="log" id="log"></div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
