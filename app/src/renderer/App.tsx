@@ -57,9 +57,8 @@ export const App = () => {
   };
 
   const handleRun = async () => {
-    if (!inputPath) {
-      setLogLines((prev) => [...prev, { id: nextLogId + 1, text: "Please select input first." }]);
-      setNextLogId((id) => id + 1);
+      setLogLines((prev) => [...prev, { id: prev.length, text: "Please select input first." }]);
+      return;
       return;
     }
     setLogLines([]);
