@@ -30,21 +30,19 @@ export const App = () => {
     const api = window.kururi;
     if (!api) return;
     api.onLog((line) => {
-      setLogLines((prev) => [...prev, { id: nextLogId + 1, text: line }]);
-      setNextLogId((id) => id + 1);
+      setLogLines((prev) => [...prev, { id: prev.length, text: line }]);
     });
     api.onStatus((status) => {
       setLogLines((prev) => [
         ...prev,
         {
-          id: nextLogId + 1,
+          id: prev.length,
           text: `Process exited code=${status.code} signal=${status.signal ?? "none"}`,
         },
       ]);
-      setNextLogId((id) => id + 1);
       setRunning(false);
     });
-  }, [nextLogId]);
+  }, []);
 
   const handleChoose = async (type: "file" | "directory") => {
     const selected = await window.kururi.selectInput(type);
