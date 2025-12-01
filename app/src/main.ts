@@ -63,7 +63,8 @@ ipcMain.handle("select-output-dir", async () => {
 });
 
 const buildArgs = (request: PredictRequest): string[] => {
-  const stats = fs.statSync(request.inputPath);
+  const stats = fs.existsSync(request.inputPath) ? fs.statSync(request.inputPath) : null;
+  if (!stats) throw new Error(`Input path does not exist: ${request.inputPath}`);
   const args: string[] = ["-m", "cli.main", "predict"];
   if (stats.isDirectory()) {
     args.push("--dir", request.inputPath);
