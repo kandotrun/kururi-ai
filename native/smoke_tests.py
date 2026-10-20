@@ -339,7 +339,9 @@ def main() -> None:
         )
         assert weighted["models"] == 2 and weighted["class"] == 1, weighted
         assert weighted["probabilities"][1] > weighted["probabilities"][3]
-        checks.append("Repeated model inputs and per-model weights form a weighted ensemble")
+        checks.append(
+            "Repeated model inputs and per-model weights form a weighted ensemble"
+        )
 
         recommended_model = root / "recommended-four-views.onnx"
         helper.set_model_props(
