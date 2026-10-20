@@ -17,6 +17,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e "cli[dev]"
       - name: Lint
-        run: black --check cli
+        run: black --check cli training native/export_onnx.py native/smoke_tests.py scripts
       - name: Test
         run: pytest

@@ -1,113 +1,135 @@
-# くるりAI CLI
+# くるりAI v2.0.0
 
-ViTモデルで画像の回転角を判定するCLIです。CPU / CUDA / Apple MPSで動作し、チェックポイントはGitHub
-Releaseから初回自動ダウンロードできます。単一ファイルまたはディレクトリ再帰処理に対応し、補正画像の保存も行えます。
+画像の補正方向を `0`、`90`、`180`、`270` 度の時計回り角度として推定する
+Rust/ONNX CLIです。v2では3つのConvNeXtモデルを統合し、通常は2モデル、
+判定が僅差のときだけ3モデル目を使うカスケードにしました。
 
-## 特徴
+凍結した非公開テストでは、同じ画素・同じ704回転条件でv1が626/704
+（88.92%）、v2が700/704（99.43%）でした。4032×3024 JPEGの新規プロセス
+待ち時間は、Apple M4 Maxで中央値418.6 ms、p95 461.5 msです。
 
-- 初回実行時にモデルが無ければ自動ダウンロード（URL・sha256は引数または環境変数で設定可能）
-- 単一画像とディレクトリ一括処理の両対応
-- 補正済み画像の保存オプションあり
-- Pythonのみで完結し、型付き・最小依存
+評価データ、ラベル、速度条件、モデルハッシュ、不確実性と残る制約は
+[モデルカード](MODEL_CARD.md)と
+[ベンチマークレポート](BENCHMARK_REPORT.md)に記載しています。テストは
+176枚・78シーン群で、正解ラベルは所有者の前提とAI目視確認による暫定値です。
+一般的な写真すべてで99.43%になるという意味ではありません。
 
-## 必要環境
+## 配布物の使い方
 
-- Python 3.12.9
-- PyTorch, TorchVision, timm, Pillow（`uv pip install -e cli` で導入）
+ランタイム側に`kururi-native`、`kururi`、ONNX Runtime共有ライブラリを、
+モデル側に3つの`.onnx`と同名の`.onnx.data`を置きます。配布物を同じ親
+ディレクトリへ展開した場合、`kururi`が標準構成を自動指定します。
 
-## セットアップ
-
-```bash
-git clone https://github.com/kandotrun/kururi-ai.git
-cd kururi-ai
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e cli
+```sh
+./kururi predict --image /path/to/photo.jpg
 ```
 
-## モデル自動ダウンロード
+モデルディレクトリが実行ファイル隣の`models/`でない場合:
 
-- `models/kururi-orient-v1.pth` が無い場合、指定URLから取得します。
-
-```bash
-export KURURI_MODEL_URL="https://github.com/<owner>/<repo>/releases/download/v0.1.0/kururi-orient-v1.pth"
-export KURURI_MODEL_SHA256="<sha256sum>"
-export KURURI_MODEL_TIMEOUT=1800   # 任意
+```sh
+KURURI_MODEL_DIR=/path/to/models \
+  ./kururi predict --image /path/to/photo.jpg
 ```
 
-- デフォルトURLはプレースホルダ `https://github.com/OWNER/REPO/releases/download/v0.1.0/kururi-orient-v1.pth`
-  なので、公開後に実URLへ置き換えてください。
+補正画像を新しいファイルへ保存:
 
-## 使い方
-
-単一画像:
-
-```bash
-uv run python cli/main.py predict \
-  --image /path/to/image.jpg \
-  --device cpu \
-  --model-name vit_large_patch16_224 \
-  --save-rotated /path/to/fixed.jpg
+```sh
+./kururi predict \
+  --image /path/to/photo.jpg \
+  --output /path/to/corrected.jpg
 ```
 
-ディレクトリ再帰処理:
+モデル読込を再利用してディレクトリを処理:
 
-```bash
-uv run python cli/main.py predict \
-  --dir /path/to/images \
-  --save-rotated-dir outputs \
-  --device cpu \
-  --model-name vit_large_patch16_224
+```sh
+./kururi predict \
+  --dir /path/to/photos \
+  --output-dir /path/to/new-output-directory
 ```
 
-対応拡張子: jpg, jpeg, png, bmp, tif, tiff, webp。
+既存ファイルや既存出力ディレクトリは上書きしません。ディレクトリ内の
+シンボリックリンクはたどりません。個別画像のエラーはJSON結果に残り、
+1件でも失敗した場合の終了コードは`2`です。
 
-同梱サンプルで試す（再帰処理）:
+対応形式はJPEG、PNG、WebP、TIFF、BMPです。HEIC、DNG、NEFなどのRAWは
+現在ネイティブデコードできません。変換する場合も元のEXIFの向きを失わないで
+ください。
 
-```bash
-uv run python cli/main.py predict \
-  --dir samples \
-  --save-rotated-dir samples_out \
-  --device cpu
+## ソースからのビルド
+
+Rust 1.96以降、C/C++リンカー、Python 3.12が必要です。ONNX Runtimeを取得して
+実行ファイルの隣へ配置します。
+
+```sh
+cargo build --release --locked --manifest-path native/Cargo.toml
+python3.12 -m venv .venv-native
+.venv-native/bin/python -m pip install -r native/requirements-native.txt
+.venv-native/bin/python scripts/prepare_native_runtime.py \
+  --binary native/target/release/kururi-native \
+  --destination dist/native-runtime
 ```
 
-壊れた画像をスキップして処理を継続したい場合:
+配布モデルを`dist/native-runtime/models/`へ置くと、
+`dist/native-runtime/kururi`をそのまま使えます。配置後の推論にPythonは不要です。
 
-```bash
-uv run python cli/main.py predict \
-  --dir /path/to/images \
-  --save-rotated-dir /path/to/images \
-  --skip-broken
+直接バイナリを呼ぶ場合の標準構成:
+
+```sh
+./kururi-native predict \
+  --model models/convnext-base-224.onnx --model-weight 0.5 \
+  --model models/convnext-small-288.onnx --model-weight 0.4 \
+  --fallback-model models/convnext-small-224.onnx \
+  --fallback-weight 0.1 \
+  --fallback-margin 0.033333333 \
+  --parallel-models \
+  --threads 12 \
+  --image /path/to/photo.jpg
 ```
 
-サンプル入力と補正結果（サムネイル表示）:
+## 入出力
 
-| # | 入力                                                               | 補正後出力                                                                 |
-|---|------------------------------------------------------------------|-----------------------------------------------------------------------|
-| 1 | <img src="samples/sample1.webp" width="180" alt="sample1 input"> | <img src="samples/out/sample1.webp" width="180" alt="sample1 output"> |
-| 2 | <img src="samples/sample2.webp" width="180" alt="sample2 input"> | <img src="samples/out/sample2.webp" width="180" alt="sample2 output"> |
-| 3 | <img src="samples/sample3.webp" width="180" alt="sample3 input"> | <img src="samples/out/sample3.webp" width="180" alt="sample3 output"> |
-| 4 | <img src="samples/sample4.webp" width="180" alt="sample4 input"> | <img src="samples/out/sample4.webp" width="180" alt="sample4 output"> |
-| 5 | <img src="samples/sample5.jpg" width="180" alt="sample5 input">  | <img src="samples/out/sample5.jpg" width="180" alt="sample5 output">  |
+最初にEXIFの向きを画素へ適用します。`correction_cw`は、その表示状態の画素に
+適用する時計回りの補正角です。保存時も同じ方向へ回転します。
 
-### チェックポイント関連オプション
+保存結果は元解像度の画素から再エンコードされ、元のEXIF/ICCメタデータは
+引き継ぎません。JPEG保存は非可逆で、現在の品質は75です。出力を指定しなければ
+入力画像は読み取り専用です。
 
-- `--checkpoint` 保存先パス（既定 `models/kururi-orient-v1.pth`）
-- `--checkpoint-url` ダウンロードURL
-- `--checkpoint-sha256` 整合性検証用ハッシュ
-- `--download-timeout` タイムアウト秒（既定 1800 または `KURURI_MODEL_TIMEOUT`）
+`--min-confidence`はsoftmax最大確率が閾値未満の画像を保存せず、判定保留に
+できます。既定値は`0`です。確率校正は行っていないため、高確率でも正解を
+保証しません。
 
-## GitHub Release への登録手順
+標準構成は4方向入力を各モデルの1バッチとして推論します。2つの一般モデルは
+並列実行し、上位2クラスの確率差が`0.033333333`未満のときだけ、Small-224を
+読み込んで追加推論します。
 
-1. ハッシュ取得: `shasum -a 256 models/kururi-orient-v1.pth`
-2. Releaseを作成し、アセットとして `kururi-orient-v1.pth` をアップロード。
-3. READMEと環境変数例、コード内のデフォルトURLを実URLとsha256に更新。
+## データと評価
+
+方向判定の学習・検証・テストには、owner提供の非公開写真を使いました。EXIFを
+適用したRGB画素を最大辺1,024へ正規化し、学習と評価の前に元画像・シーン群単位で
+分割しています。
+
+追加調査として、Wikimedia Commons 1,120枚、iNaturalist 1,700枚、
+合成UI 1,000枚も収集し、v6-v9の候補を学習・比較しました。最終リリースは
+検証データで選ばれたv5系3モデルの統合で、Wikimedia/iNaturalist候補は最終重みに
+含まれません。合成UI 958枚はSmall-224モデルの学習に使われています。
+
+公開元画像、個人写真、ファイルパス付き評価記録、画像ごとの予測は配布しません。
+詳細は[MODEL_CARD.md](MODEL_CARD.md)を参照してください。
+
+## v1との互換性
+
+従来のPython CLIとViTモデルは[v1の使い方](docs/LEGACY_V1.ja.md)に残しています。
+v1の`angle_ccw`は保存処理の回転方向を正しく表していなかったため、v2では
+`correction_cw`を使用します。v1とv2の重みだけを入れ替えることはできません。
 
 ## ライセンス
 
-- コードと同梱モデルは MIT ライセンスで提供します。`LICENSE` を参照してください。
-- 元モデル開発者: 新野ユキ (Yuki Arano)
-    - Twitter: https://x.com/yuki_arano
-    - GitHub: https://github.com/ObuchiYuki
-    - 元ツイート: https://x.com/yuki_arano/status/1788051297108902073
-    - iOSアプリ: https://apps.apple.com/jp/app/ai%E3%81%8C%E5%86%99%E7%9C%9F%E3%81%AE%E5%90%91%E3%81%8D%E3%82%92%E4%BF%AE%E6%AD%A3-%E3%81%8F%E3%82%8B%E3%82%8Aai/id6480589907
+プロジェクトコードはMITです。v2モデルはApache-2.0を宣言するtimm ConvNeXt
+事前学習重みの派生で、向き分類用の変更とONNX変換を行っています。
+[第三者のライセンスとクレジット](THIRD_PARTY_NOTICES.md)を参照してください。
+
+従来のv1向き判定モデルの作者は
+[新野ユキ / Yuki Arano](https://github.com/ObuchiYuki)です。
+
+[English](README.md)

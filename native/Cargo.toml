@@ -1,0 +1,19 @@
+[package]
+name = "kururi-native"
+version = "2.0.0"
+edition = "2024"
+description = "Local image-orientation inference and a measured raw-tensor ONNX harness"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp", "tiff", "bmp"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-31"] }
+serde_json = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
