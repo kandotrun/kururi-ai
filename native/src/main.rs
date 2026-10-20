@@ -183,8 +183,10 @@ fn read_tensor(path: &Path, side: usize) -> Result<Vec<f32>> {
         bytes.len()
     );
     let values: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| f32::from_le_bytes(*chunk))
         .collect();
     ensure!(
         values.iter().all(|x| x.is_finite()),
@@ -290,7 +292,12 @@ fn extract_logits(
         **shape == [batch as i64, 4_i64],
         "Expected logits shape [{batch},4], got {shape:?}"
     );
-    Ok(values.chunks_exact(4).map(|row| row.to_vec()).collect())
+    Ok(values
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|row| row.to_vec())
+        .collect())
 }
 
 fn run_model(

@@ -50,11 +50,16 @@ fn horizontal(source: &RgbImage, width: u32) -> RgbImage {
         .chunks_exact(input_stride)
         .zip(output.as_mut().chunks_exact_mut(output_stride))
     {
-        for (tap, pixel) in taps.iter().zip(output_row.chunks_exact_mut(3)) {
+        for (tap, pixel) in taps.iter().zip(output_row.as_chunks_mut::<3>().0) {
             let mut sums = [ROUNDING_BIAS; 3];
             let start = tap.start * 3;
             let end = start + tap.weights.len() * 3;
-            for (sample, &weight) in input_row[start..end].chunks_exact(3).zip(&tap.weights) {
+            for (sample, &weight) in input_row[start..end]
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .zip(&tap.weights)
+            {
                 for channel in 0..3 {
                     sums[channel] += i64::from(sample[channel]) * i64::from(weight);
                 }
@@ -73,7 +78,7 @@ fn vertical(source: &RgbImage, height: u32) -> RgbImage {
     let input = source.as_raw();
     let mut output = RgbImage::new(source.width(), height);
     for (tap, output_row) in taps.iter().zip(output.as_mut().chunks_exact_mut(stride)) {
-        for (position, pixel) in output_row.chunks_exact_mut(3).enumerate() {
+        for (position, pixel) in output_row.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let mut sums = [ROUNDING_BIAS; 3];
             for (offset, &weight) in tap.weights.iter().enumerate() {
                 let start = (tap.start + offset) * stride + position * 3;
