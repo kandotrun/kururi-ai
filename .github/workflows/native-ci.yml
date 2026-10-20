@@ -1,0 +1,49 @@
+name: Native CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            architecture: arm64
+          - os: ubuntu-22.04
+            architecture: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify runner architecture
+        env:
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: test "$(uname -m)" = "$EXPECTED_ARCHITECTURE"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install synthetic-model tooling
+        run: python -m pip install -r native/requirements-native.txt
+      - name: Format
+        run: cargo fmt --check --manifest-path native/Cargo.toml
+      - name: Lint
+        run: cargo clippy --locked --manifest-path native/Cargo.toml --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --locked --manifest-path native/Cargo.toml
+      - name: Release build
+        run: cargo build --release --locked --manifest-path native/Cargo.toml
+      - name: Stage runtime outside the build directory
+        run: python scripts/prepare_native_runtime.py --binary native/target/release/kururi-native --destination "${{ runner.temp }}/kururi-runtime"
+      - name: Synthetic relocated runtime smoke test
+        run: env -u ORT_DYLIB_PATH python native/smoke_tests.py --binary "${{ runner.temp }}/kururi-runtime/kururi-native" --report "${{ runner.temp }}/native-smoke-report.json"

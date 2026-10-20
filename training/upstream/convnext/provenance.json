@@ -1,0 +1,23 @@
+{
+  "model_name": "convnext_tiny.fb_in22k_ft_in1k",
+  "repository": "timm/convnext_tiny.fb_in22k_ft_in1k",
+  "revision": "bc48a87f119bae1b06418f5340bfa97ef75d4609",
+  "model_card_url": "https://huggingface.co/timm/convnext_tiny.fb_in22k_ft_in1k/blob/bc48a87f119bae1b06418f5340bfa97ef75d4609/README.md",
+  "license_declared_by_upstream": "apache-2.0",
+  "pretraining_dataset": "ImageNet-22k, fine-tuned on ImageNet-1k",
+  "upstream_author": "Meta/Facebook Research; timm conversion",
+  "files": {
+    "model.safetensors": {
+      "sha256": "77b619e187de71bce58721689da0c009e84cc20677293d7d43105307e34d868a",
+      "bytes": 114374272
+    },
+    "config.json": {
+      "sha256": "05b31a3e4e2f16a1ad61f64ea4b34ba2e17fb10e72c48490de088b92b97a6151",
+      "bytes": 666
+    },
+    "README.md": {
+      "sha256": "5829109fcf28ec11af3f28fe4477a8319a4aaf39aa67a3ab7b4499e8d1720d4d",
+      "bytes": 15750
+    }
+  }
+}

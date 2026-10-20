@@ -1,3 +1,13 @@
 /cli/cli.egg-info/
 /models/
 /.idea/
+.venv*/
+__pycache__/
+*.py[cod]
+/native/target/
+/native/smoke-report.json
+/native/smoke-*/
+/training/runs/
+/training/pretrained/
+/dist/
+/private-data/
