@@ -8,6 +8,34 @@ On the frozen private test set's identical 704 rotations, v1 scored 626/704
 (88.92%) and v2 scored 700/704 (99.43%). For a 4032×3024 JPEG, fresh-process
 wall time on Apple M4 Max was 418.6 ms median and 461.5 ms p95.
 
+## Improvement over v1
+
+| Metric | v1 | v2.0.0 | Change |
+|---|---:|---:|---:|
+| Correct rotations | 626/704 (88.92%) | **700/704 (99.43%)** | **+74 cases / +10.51 points** |
+| Scene-group macro accuracy | 83.35% | **99.36%** | **+16.01 points** |
+| Sources correct on all four rotations | 141/176 (80.11%) | **175/176 (99.43%)** | **+34 images / +19.32 points** |
+| Incorrect rotations | 78 | **4** | **94.87% fewer** |
+| 12MP JPEG wall time | 3,932 ms | **418.6 ms** | **about 9.4× faster** |
+
+The screen category improved from 111/176 to **176/176**, and scenes improved
+from 199/208 to **208/208**. All four remaining errors came from the same
+closeup source. The paired scene-group 95% interval for rotation accuracy
+improvement is **+5.24 to +17.95 points**.
+
+The latency comparison is for the same source image on macOS ARM64. v1 used its
+Python/MPS path; v2 uses the Rust/ONNX CPU path.
+
+## Download
+
+The release is available on
+[GitHub Releases v2.0.0](https://github.com/kandotrun/kururi-ai/releases/tag/v2.0.0).
+
+- `kururi-ai-v2.0.0-macos-arm64.tar.gz`
+- `kururi-ai-v2.0.0-linux-x86_64.tar.gz`
+- `kururi-ai-v2.0.0-model.tar.gz`
+- `SHA256SUMS`
+
 Read [the model card](MODEL_CARD.md) and
 [benchmark report](BENCHMARK_REPORT.md) for the 176-image test set, provisional
 labels, hashes, speed conditions, uncertainty, and limitations. The 99.43%

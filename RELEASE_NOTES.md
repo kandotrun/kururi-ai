@@ -5,10 +5,16 @@ runtime and a three-model ConvNeXt ensemble.
 
 ## Results
 
-- Frozen test: 700/704 rotations correct (99.43%).
-- v1 on the same 704 rotations: 626/704 (88.92%).
-- Paired scene-group bootstrap improvement: +10.51 points, 95% interval
-  +5.24 to +17.95.
+| Metric | v1 | v2.0.0 | Change |
+|---|---:|---:|---:|
+| Frozen test rotations | 626/704 (88.92%) | 700/704 (99.43%) | +74 cases / +10.51 points |
+| Scene-group macro accuracy | 83.35% | 99.36% | +16.01 points |
+| All-four-correct sources | 141/176 (80.11%) | 175/176 (99.43%) | +34 images / +19.32 points |
+| Incorrect rotations | 78 | 4 | 94.87% fewer |
+
+The paired scene-group bootstrap improvement for rotation accuracy is +10.51
+points with a 95% interval of +5.24 to +17.95.
+
 - Validation: 424/428 rotations correct (99.07%).
 - 4032×3024 JPEG fresh-process latency on Apple M4 Max: 418.6 ms median,
   461.5 ms p95.
