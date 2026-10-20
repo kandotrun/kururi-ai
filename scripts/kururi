@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+model_dir=${KURURI_MODEL_DIR:-"$script_dir/models"}
+
+if [ "${1-}" = "predict" ]; then
+    shift
+fi
+
+for model in convnext-base-224.onnx convnext-small-288.onnx convnext-small-224.onnx; do
+    if [ ! -f "$model_dir/$model" ]; then
+        printf 'Missing model: %s\n' "$model_dir/$model" >&2
+        printf 'Set KURURI_MODEL_DIR to the directory containing the v2 models.\n' >&2
+        exit 2
+    fi
+done
+
+exec "$script_dir/kururi-native" predict \
+    --model "$model_dir/convnext-base-224.onnx" \
+    --model-weight 0.5 \
+    --model "$model_dir/convnext-small-288.onnx" \
+    --model-weight 0.4 \
+    --fallback-model "$model_dir/convnext-small-224.onnx" \
+    --fallback-weight 0.1 \
+    --fallback-margin 0.033333333 \
+    --parallel-models \
+    --threads 12 \
+    "$@"

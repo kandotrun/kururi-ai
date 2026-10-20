@@ -1,208 +1,177 @@
-# Kururi orientation v2 model card
+# Kururi AI orientation model v2.0.0
 
-## Status and intended use
+## Status
 
-This model card describes the experimental `2.0.0-rc.1` candidate. The selected
-checkpoint is `convnext_tiny.fb_in22k_ft_in1k`, chosen using validation data
-before the frozen test set was evaluated. The final test point estimate was
-lower than v1, so this is an opt-in prerelease rather than a stable replacement.
+`v2.0.0` is the first Kururi release that replaces v1 as the recommended
+orientation pipeline. It predicts a right-angle clockwise correction in
+`0`, `90`, `180`, or `270` degrees.
 
-The model predicts right-angle correction for ordinary images. It does not
-estimate arbitrary tilt angles, camera pose, subject orientation or the intended
-reading order of every image. A screenshot containing a rotated photograph can
-have two different notions of upright. Abstract patterns, overhead views,
-symmetry and unusual compositions may have no unique correct orientation.
+The release is a three-model ConvNeXt ensemble with a validation-selected
+low-confidence cascade. On the frozen private test set it scored 700/704
+rotations (99.43%) in the native Rust/ONNX runtime. The v1 checkpoint scored
+626/704 (88.92%) on the identical canonical pixels and rotations.
 
-## Input and output contract
+The result is conditional on a small owner-provided test collection and
+provisional AI-reviewed orientation labels. It demonstrates the measured
+release criterion, not universal photographic accuracy.
 
-- Input: float32 RGB NCHW `[1,3,224,224]`.
-- Apply EXIF orientation once to the decoded source pixels.
-- Resize the full image to 224×224. Training uses Pillow bilinear; record the
-  selected native resizer implementation from the CLI's `resampler` field.
-  Aspect ratio is distorted, and nothing is cropped. Native decoding/resampling
-  differences require measured validation.
-- Divide RGB values by 255, then normalize with mean
-  `[0.485,0.456,0.406]` and standard deviation `[0.229,0.224,0.225]`.
-- Output: four logits in clockwise correction order `[0,90,180,270]`.
-- For a canonical upright source synthetically rotated clockwise by `r`,
-  the correction target is `(-r) % 360`.
-- Softmax scores are uncalibrated. An abstention threshold must be chosen on
-  validation data and evaluated separately for coverage and accepted accuracy.
-- The selected model embeds a four-view recommendation. It averages
-  correction-aligned probabilities from four rotated input tensors and performs
-  four forwards per image. Single-view prediction is an experimental override.
+## Intended use
 
-## Provenance
+The model is intended for still images where the correct result is one of four
+right-angle rotations. Typical examples are phone screenshots, documents,
+scanned pages, maps, people, and ordinary camera scenes.
 
-The selected model is transfer learning, not training from random initialization.
-The four-class head replaces the original ImageNet classifier, and orientation
-fine-tuning changes the pretrained weights. ONNX export is another modification.
-No legacy v1 orientation weights or teacher labels are used by this baseline.
+It does not estimate small tilt angles, camera pose, the intended reading order
+inside a screenshot, or a unique upright direction for symmetric and abstract
+content. It can rotate an already upright image incorrectly. Saving is opt-in
+and never overwrites the source image.
 
-Backbones downloaded for comparison:
+## Ensemble
 
-| Candidate | Upstream revision | Upstream weights SHA256 |
-|---|---|---|
-| `mobilenetv4_conv_small.e2400_r224_in1k` | `331fb803779522b685cf942e15f914fb6741c1eb` | `7a7102ec18f62bbfb555b6fe829bbb5af749516b84174926c29ffdfdfc03aec4` |
-| `mobilenetv4_conv_medium.e500_r224_in1k` | `02a09fbfb82b289e871ba8255f9da58c056fb13b` | `10f9f8057d574f71d22c52d31cadab8af0bc325841fd93939c86d45d20998cad` |
-| `convnext_tiny.fb_in22k_ft_in1k` | `bc48a87f119bae1b06418f5340bfa97ef75d4609` | `77b619e187de71bce58721689da0c009e84cc20677293d7d43105307e34d868a` |
+The models use ImageNet normalization, RGB input, NCHW layout, and class order
+`[0,90,180,270]` meaning clockwise correction.
 
-The MobileNetV4 model cards declare Apache-2.0 and ImageNet-1k pretraining by
-Ross Wightman / timm:
-[small](https://huggingface.co/timm/mobilenetv4_conv_small.e2400_r224_in1k/blob/331fb803779522b685cf942e15f914fb6741c1eb/README.md),
-[medium](https://huggingface.co/timm/mobilenetv4_conv_medium.e500_r224_in1k/blob/02a09fbfb82b289e871ba8255f9da58c056fb13b/README.md).
-The [ConvNeXt card](https://huggingface.co/timm/convnext_tiny.fb_in22k_ft_in1k/blob/bc48a87f119bae1b06418f5340bfa97ef75d4609/README.md)
-also declares Apache-2.0; its paper authors pretrained on ImageNet-22k and
-fine-tuned on ImageNet-1k, with a timm conversion.
-Only the ConvNeXt checkpoint is part of the v2 release asset. Its upstream card,
-provenance JSON and Apache-2.0 license accompany the distributed derivative.
+| Role | Backbone | Input | Ensemble weight | Checkpoint SHA256 |
+|---|---|---:|---:|---|
+| General | `convnext_base.fb_in22k_ft_in1k` | 224×224 | 0.5 | `62e3bfdfa6e821f4ce600de894af593c8561bd2d3c3ca090a2c2396d64135f9f` |
+| General | `convnext_small.fb_in22k_ft_in1k` | 288×288 | 0.4 | `bf07348b61fd4c012ce555d54fe7bfddd71373ee5e22100ce49f8fcb6f451d35` |
+| Cascade | `convnext_small.fb_in22k_ft_in1k` | 224×224 | 0.1 | `4b1f1209f950d11ee8fbc1ea7388e74c07916f8591356555d58523fe533b1e8b` |
 
-## Dataset and labels
+Each model receives all four rotations `[0,90,180,270]` as one batch. The
+runtime aligns each class back to the input coordinate system and averages the
+four softmax distributions. The two general models are weighted 0.5 and 0.4.
+The 224-pixel cascade model is loaded only when the normalized top-one minus
+top-two probability margin is below `0.033333333`, and its full weight is 0.1.
 
-Fine-tuning and evaluation use a bounded sample from one private, owner-provided
-image collection. The owner reported that most source images were already
-upright. Provisional orientation labels use this premise and independent AI
-visual review; they are not all owner-confirmed or independently human-annotated.
-Evaluation against them is conditional on their correctness.
+The cascade rule is a latency optimization selected on validation data. It
+invokes the third model for 8/428 validation rotations and 24/704 test
+rotations. Every model's ONNX input is static batch 4, so the four rotations
+execute in one ONNX Runtime call per model.
 
-The sample is not a random sample of all photography and may contain correlated
-scenes, captures, formats and repeated subjects. Source images and identifying
-image content are not public. Public reports contain aggregate statistics only.
+### ONNX artifacts
 
-The split is made by source groups before rotation augmentation. Exact and
-cross-format duplicates share a representative; related variants remain within
-one split. This prevents the four rotations of a photograph from crossing
-training and evaluation. Grouping remains a heuristic and cannot rule out every
-semantic near-duplicate.
+| Artifact | Graph SHA256 | External data SHA256 | Total bytes |
+|---|---|---|---:|
+| `convnext-base-224.onnx` | `c6b208e7d60733a0665b889e91f1f2a5aa91de2904e011e868d6d788b2935f42` | `edd2c08881fcee5407c48bbfcfabd0018ace8cf0a63b7883a27f661b6292c833` | 351,746,177 |
+| `convnext-small-288.onnx` | `3f81e598475bd51f0a02581d21051146c737fdb324e1de48b139a7df23563cdc` | `983e83a68323b0785acaf4abd4a62f1d04c497521e86ed4e296409fd8f1f07f7` | 199,309,562 |
+| `convnext-small-224.onnx` | `343f9ff1394725f4f69b37aabf6cc0de915a074cd6e54e719825c5d5689d4cea` | `5321c288da8eed5f46a8eff8c9272252622adb4be5391c3ab5f70452976d5192` | 199,309,562 |
 
-| Dataset property | Value for selected release |
-|---|---|
-| Converted source images | 762; 91 PNG, 54 JPEG, 564 DNG, 43 HEIC, 10 NEF |
-| Usable representative sources and groups | 721 sources across 315 scene groups |
-| Train / validation / test sources | 536 / 107 / 78 |
-| Train / validation / test groups | 251 / 35 / 29 |
-| Exclusions | 36 exact or cross-format duplicates and 5 ambiguous originals |
-| Usable format count | 560 DNG, 89 PNG, 41 HEIC, 31 JPEG |
-| Category count | 103 scene, 85 screen, 64 people, 17 closeup, 8 document, 2 food, 1 graphic, 441 uncategorized training originals |
-| Label review | Validation and test: 185 independently AI-reviewed (180 high, 5 medium confidence). Training: 95 AI-reviewed and 441 provisional from the owner's mostly-upright premise. No label is described as human verified. |
-| Canonical pixels | EXIF-transposed RGB JPEG, maximum dimension 1024, EXIF removed; RAW sources use embedded JPEG previews |
-| Frozen manifest SHA256 | `9817683ccce0dc2367429cee4ddf9ec02591c9620f637b70a22fbd88596146d0` |
-| Leakage controls | Duplicate representatives removed; exact and cross-format duplicates grouped; scene groups do not cross splits |
+Total model storage is 750,365,301 bytes. Every graph requires its adjacent
+`.onnx.data` file.
 
-## Training and selection
+Export used PyTorch 2.14.1, timm 1.0.30, ONNX 1.23.2, ONNX Runtime 1.31.0,
+ONNXScript 0.7.2, FP32 weights, opset 18, eval mode, and a static batch of four.
+Random-tensor PyTorch/ONNX parity checks passed with maximum absolute logit
+differences below `0.000008`.
 
-Training contributes all four rotations of every source each epoch in shuffled
-order, with brightness and contrast changes of up to 10%. Inverse group-size
-weights reduce the influence of repeated captures. The selected ConvNeXt run
-used seed `20261020`, batch size 32, three classifier-only epochs, at most
-15 epochs, classifier head learning rate `0.001`, backbone learning rate
-`0.00001`, classifier fine-tuning rate `0.0001`, weight decay `0.01`, label
-smoothing `0.03`, and frozen BatchNorm running statistics. Group macro accuracy
-selected epoch 12; cross-entropy broke ties and patience was four epochs.
+## Data
 
-The selected checkpoint has SHA256
-`b7097cbbf39c13b989ee7ee1d6dad3fa365946e17322ba5537de27fa437df52a`
-and is 111,340,831 bytes. PyTorch and native ONNX execution both use four
-correction-aligned views selected on validation data.
+### Private orientation data
 
-The test split is reserved for the final selected candidate. Architecture,
-checkpoint, hyperparameters and confidence threshold must not be selected from
-test results. If a test result informs a later model revision, it becomes
-development evidence and a new independent final test is required.
+The source images came from the owner's photo collection. The owner reported
+that most images were already upright. Correctness at test time is therefore
+partly based on an owner premise plus an independent AI visual review, not a
+fully human-verified annotation project.
 
-Seeds, package versions, upstream revisions and input hashes are recorded.
-Hardware kernels, particularly MPS, may prevent bit-for-bit reproduction across
-versions or machines. Since the source dataset is private, third parties can
-reproduce the procedure with their own data but cannot independently reproduce
-the exact reported accuracy from the public repository alone.
+The release split is grouped by source and scene before rotation augmentation:
 
-## Evaluation evidence
+| Split | Sources | Scene groups | Rotation cases |
+|---|---:|---:|---:|
+| Train | 438 | 202 | 1,752 |
+| Validation | 107 | 35 | 428 |
+| Test | 176 | 78 | 704 |
 
-Report v1 and the selected v2 on the same held-out groups and same provisional
-labels. Also report the native v2 result, because a converted model's Python
-accuracy alone does not establish the distributed CLI's accuracy.
+Exact and cross-format duplicates do not cross splits. Canonical pixels are
+EXIF-transposed RGB, maximum dimension 1,024, with EXIF removed. DNG and NEF
+inputs use embedded JPEG previews. Source images and per-photo evidence are
+private and are not part of this repository or public release archives.
 
-| Metric | v1 baseline | Selected v2 PyTorch | Selected v2 native |
-|---|---|---|---|
-| Correct rotated variants / total | 298 / 312 (95.51%) | 292 / 312 (93.59%) | 292 / 312 (93.59%) |
-| Group macro accuracy | 90.95% | 88.72% | 88.72% |
-| Sources correct on all four rotations | 71 / 78 (91.03%) | 73 / 78 (93.59%) | 73 / 78 (93.59%) |
-| Initially upright inputs wrongly rotated | 3 / 78 | 5 / 78 | 5 / 78 |
-| High-confidence-label sensitivity | 286 / 300 (95.33%) | 280 / 300 (93.33%) | 280 / 300 (93.33%) |
-| Default coverage and accuracy | 312 / 312, 95.51% | 312 / 312, 93.59% | 312 / 312, 93.59% |
+### Public and synthetic experiments
 
-The paired scene-group bootstrap difference for v2 minus v1 was -1.92 percentage
-points for rotated variants (95% interval -7.27 to +3.82), -2.23 points for group
-macro accuracy (interval -11.96 to +6.39), and +2.56 points for the all-four
-success fraction (interval -4.55 to +13.11). The intervals include zero and are
-conditional on this private sample and provisional labels.
+Additional upright data was collected from 1,120 Wikimedia Commons files and
+1,700 iNaturalist observations. A separate set of 1,000 synthetic UI fixtures
+was also generated. The public candidates were evaluated in the recorded
+iterations v6-v9 and were useful for testing domain expansion, but they did not
+replace the validation-selected v5 general models. The shipped Small-224 model
+uses 958 synthetic UI fixtures together with private training sources.
 
-The native run produced all 312 final classes identically to PyTorch. Its largest
-absolute probability difference from the Python four-view result was `0.01864`.
-This establishes implementation parity for the frozen PNG inputs; it does not
-add independent accuracy evidence.
+Wikimedia attribution and license URLs remain in the private manifests. The
+public collection is not redistributed in the release archives.
 
-Four variants from one source are not four independent images. Confidence
-intervals must resample groups, not individual rotations. Small or correlated
-test sets make estimates uncertain; neither accuracy improvement nor broad
-generalization follows from a high point estimate alone.
+## Evaluation
 
-Single-view v2 scored 206/312 (66.03%) on the same test, so the reported v2
-accuracy depends on four-view aggregation. The four-view softmax maximum is not
-calibrated. No confidence threshold was selected from the test set; the shipped
-default is zero.
+All accuracy runs use the same canonical pixels, 78 scene groups, four synthetic
+rotations per source, and class correction `(-applied_rotation) mod 360`.
+Confidence intervals resample scene groups rather than treating rotations as
+independent observations.
 
-| Latency or packaging property | Value |
-|---|---|
-| Machine, CPU, OS and runtime | Apple M4 Max, 128 GiB RAM, macOS 27.0.1 ARM64; ONNX Runtime 1.31.0, API 31; `ort` 2.0.0-rc.15 |
-| v1 CPU process, 4032×3024 JPEG | Median 3,932 ms, p95 4,420 ms, 5 trials |
-| v1 CPU process, 8064×6048 JPEG | Median 4,126 ms, p95 4,338 ms, 3 trials |
-| v2 CPU process, prediction only, 4032×3024 JPEG | Median 173.3 ms, p95 178.8 ms, 20 trials |
-| v2 CPU process, prediction only, 8064×6048 JPEG | Median 451.2 ms, p95 459.5 ms, 10 trials |
-| v2 CPU process including corrected JPEG copy, 4032×3024 | Median 246.8 ms, p95 256.8 ms, 10 trials |
-| Warm four-view inference only | Median 53.2 ms, p95 60.2 ms, 10 timed runs after 2 warmups |
-| Storage and cache conditions | Source images on a NAS; OS file cache warm and uncontrolled; not a cold-storage measurement |
-| Model bytes including external data | 112,063,961 bytes (`718,297` graph + `111,345,664` data) |
-| Native binary and runtime library bytes | 2,208,880 + 33,037,336 bytes |
-| Runtime configuration | Four views, eight intra-op threads, one inter-op thread, ONNX Runtime CPU provider |
-| macOS ARM64 checks | Format, Clippy, 7 unit tests, synthetic runtime checks, synthetic relocation and full-model runs passed |
-| Linux x86-64 checks | Format, Clippy, 7 unit tests, release build, synthetic runtime checks and a relocated full-model run passed under Docker/OrbStack emulation on the same Apple host; no native Linux latency benchmark |
+| Metric | v1 | v2 native |
+|---|---:|---:|
+| Rotations correct | 626/704 (88.92%) | 700/704 (99.43%) |
+| Scene-group macro accuracy | 83.35% | 99.36% |
+| Sources correct on all four rotations | 141/176 (80.11%) | 175/176 (99.43%) |
+| Screen rotations | 111/176 (63.07%) | 176/176 (100%) |
+| Scene rotations | 199/208 (95.67%) | 208/208 (100%) |
 
-Fresh-process timing may reuse the OS file cache. Do not call it an uncached
-disk measurement unless caches were actually controlled. Mac and Linux results
-are separate measurements; a Linux container on Apple Silicon does not
-establish Linux x86-64 performance.
+The paired scene-group bootstrap difference for v2 minus v1 was:
 
-## Artifact identity
+| Metric | Difference | 95% interval |
+|---|---:|---:|
+| Rotation accuracy | +10.51 points | +5.24 to +17.95 |
+| Scene-group macro accuracy | +16.01 points | +9.52 to +22.86 |
+| All-four-correct source fraction | +19.32 points | +11.17 to +30.66 |
 
-Selected model and pipeline:
+The intervals remain conditional on this private collection and its provisional
+labels. They do not establish accuracy on all cameras, cultures, document
+layouts, screen contents, or unusual compositions.
 
-- Backbone: `convnext_tiny.fb_in22k_ft_in1k`, upstream revision
-  `bc48a87f119bae1b06418f5340bfa97ef75d4609`.
-- Checkpoint SHA256:
-  `b7097cbbf39c13b989ee7ee1d6dad3fa365946e17322ba5537de27fa437df52a`.
-- ONNX graph SHA256:
-  `955d810ac1f221bd115db36a8f60d9840bb65cffdb3a3f90c30eed815338bbc5`.
-- ONNX external data SHA256:
-  `4db19793432d0b7790875151a1031b60f1573dc28ba94bf368639ea3b30b72a6`.
-- Training manifest SHA256:
-  `9817683ccce0dc2367429cee4ddf9ec02591c9620f637b70a22fbd88596146d0`.
-- Python exporter versions: PyTorch 2.14.1, timm 1.0.30, ONNX 1.23.2,
-  ONNX Runtime 1.31.0, ONNXScript 0.7.2.
+### Native accuracy validation
 
-Publication still needs the release source commit, packaged archive hashes and CI
-run links. Keep private source paths, image IDs and per-photo predictions out of
-public artifacts.
+- Validation: 424/428 (99.07%), 8 cascade invocations.
+- Frozen test: 700/704 (99.43%), 24 cascade invocations.
+- Native execution returned no per-image errors.
+- The final native class counts agree with the pre-export ensemble evaluation.
 
-## Limits and safe use
+## Speed
 
-This model can turn an already upright image incorrectly. Use prediction-only
-mode to inspect results, or write new copies. Saving currently omits original
-EXIF/ICC metadata and re-encodes JPEG. Model confidence does not establish
-correctness, and the training sample does not establish accuracy across all
-cameras, domains, image styles or accessibility needs.
+Measurements use Apple M4 Max, 128 GiB RAM, macOS 27.0.1 ARM64, ONNX Runtime
+1.31.0 CPU, 12 total model threads split across the two concurrently running
+general models. Source images were on the NAS and the operating-system file
+cache was warm.
 
-The native candidate decodes JPEG, PNG, WebP, TIFF and BMP. It does not decode
-HEIC, DNG, NEF or other RAW containers. Test canonical images were converted
-from those sources before evaluation, so the classifier accuracy result does
-not replace codec support testing for the original files.
+| Operation | Median | p95 | Trials |
+|---|---:|---:|---:|
+| v1 process, 4032×3024 JPEG | 3,932 ms | 4,420 ms | 5 |
+| v2 final process, 4032×3024 JPEG | 418.6 ms | 461.5 ms | 7 |
+| v2 native item, 704 test rotations | 185.7 ms | 243.6 ms | 704 |
+
+The final process includes process launch, ONNX Runtime loading, parallel model
+session loading, JPEG decoding, native preprocessing, two general models,
+four-view inference, optional cascade inference, and JSON output. The cascade
+model is not loaded on the high-confidence path. These are not cold-storage
+measurements. Linux benchmark numbers must be measured on Linux hardware and
+must not be inferred from macOS or from an emulated container.
+
+## Limits
+
+- The native decoder supports JPEG, PNG, WebP, TIFF, and BMP. HEIC, DNG, NEF,
+  and RAW containers currently require conversion with EXIF orientation
+  preserved.
+- Saved outputs omit original EXIF/ICC metadata. JPEG output is re-encoded and
+  is not lossless.
+- The ensemble is large because the accuracy target required three FP32 models.
+- Softmax confidence is not a calibrated correctness probability.
+- The test set is small and its labels are not a fully independent human gold
+  standard.
+- The release model is transfer learning from ImageNet-pretrained weights, not
+  a model trained from random initialization.
+
+## License and attribution
+
+Project code is MIT licensed. The released model weights are derivatives of
+timm ConvNeXt weights whose model cards declare Apache-2.0. ONNX conversion,
+the four-class heads, fine-tuning, and ensemble are modifications.
+
+The legacy v1 orientation model was created by
+[Yuki Arano / 新野ユキ](https://github.com/ObuchiYuki). Its attribution remains
+in the legacy documentation and third-party notices.

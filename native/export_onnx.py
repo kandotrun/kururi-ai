@@ -31,6 +31,7 @@ def main() -> None:
         choices=["v1-autocrop224-no-normalization", "v2-whole224-bilinear-imagenet"],
     )
     parser.add_argument("--input-tensor", type=Path)
+    parser.add_argument("--batch-size", type=int, choices=[1, 4], default=1)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--recommended-views", type=int, choices=[1, 4], default=1)
     args = parser.parse_args()
@@ -60,10 +61,13 @@ def main() -> None:
         model_name = args.model_name or checkpoint.get("model_name")
         if args.model_name and args.model_name != checkpoint.get("model_name"):
             parser.error("--model-name contradicts checkpoint model_name")
+        declared_preprocess = checkpoint.get("config", {}).get("preprocess", {})
+        image_size = int(declared_preprocess.get("image_size", 0))
+        if image_size not in (224, 288, 384):
+            parser.error("V2 checkpoints must declare image_size 224, 288 or 384")
         expected = {
-            "image_size": 224,
+            "image_size": image_size,
             "color": "RGB",
-            "resize": "whole image to 224x224, aspect ratio may change, no crop",
             "interpolation": "Pillow bilinear",
             "pixel_scale": 1 / 255,
             "mean": [0.485, 0.456, 0.406],
@@ -90,16 +94,22 @@ def main() -> None:
             )
     if not model_name:
         parser.error("--model-name is required when checkpoint has no model_name")
+    if "state_dict" not in checkpoint:
+        image_size = 224
     cleaned = {key.removeprefix("module."): value for key, value in state.items()}
     model = (
         timm.create_model(model_name, pretrained=False, num_classes=4).float().eval()
     )
     model.load_state_dict(cleaned, strict=True)
     if args.input_tensor:
-        array = np.fromfile(args.input_tensor, dtype="<f4").reshape(1, 3, 224, 224)
+        array = np.fromfile(args.input_tensor, dtype="<f4").reshape(
+            args.batch_size, 3, image_size, image_size
+        )
         sample = torch.from_numpy(array.copy())
     else:
-        sample = torch.rand(1, 3, 224, 224, dtype=torch.float32)
+        sample = torch.rand(
+            args.batch_size, 3, image_size, image_size, dtype=torch.float32
+        )
     with torch.inference_mode():
         reference = model(sample).numpy()
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -128,6 +138,8 @@ def main() -> None:
         "kururi.preprocess": args.preprocess,
         "kururi.class_order": "0,90,180,270",
         "kururi.class_semantics": "correction_clockwise_degrees",
+        "kururi.input_size": str(image_size),
+        "kururi.batch_size": str(args.batch_size),
         "kururi.recommended_views": str(args.recommended_views),
         "kururi.checkpoint_sha256": checkpoint_digest,
     }
@@ -149,7 +161,7 @@ def main() -> None:
         "preprocess": args.preprocess,
         "class_order_correction_cw": [0, 90, 180, 270],
         "recommended_views": args.recommended_views,
-        "input_shape": [1, 3, 224, 224],
+        "input_shape": [args.batch_size, 3, image_size, image_size],
         "dtype": "float32",
         "torch": torch.__version__,
         "timm": timm.__version__,
@@ -180,7 +192,9 @@ def main() -> None:
         "schema_version": 1,
         "model_name": model_name,
         "preprocess": args.preprocess,
-        "input_shape": [1, 3, 224, 224],
+        "input_shape": [args.batch_size, 3, image_size, image_size],
+        "input_size": image_size,
+        "batch_size": args.batch_size,
         "dtype": "float32",
         "class_order_correction_cw": [0, 90, 180, 270],
         "onnx_files": report["files"],

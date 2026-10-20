@@ -77,11 +77,12 @@ results to choose the architecture, checkpoint, threshold or training schedule.
 If comparing `--views 1` with `--views 4`, select this runtime setting on
 validation data too; the latter performs four forwards per prediction.
 
-For `v2.0.0-rc.1`, ConvNeXt Tiny was selected using validation only. Four-view
-validation group macro accuracy was 99.03%; single-view validation group macro
-accuracy was 68.60%. The test set was opened only after freezing the checkpoint
-and four-view setting. The final test point estimate was lower than v1, so the
-candidate remains experimental.
+For `v2.0.0`, the selected runtime is a three-model ConvNeXt ensemble:
+ConvNeXt-Base 224 at weight `0.5`, ConvNeXt-Small 288 at weight `0.4`, and
+ConvNeXt-Small 224 as a low-margin cascade at weight `0.1`. Every model uses
+four correction-aligned views. The two general models are selected and weighted
+on validation; the cascade threshold is also selected there. The native result
+on the frozen test set was 700/704 (99.43%), versus 626/704 for v1.
 
 ## Final evaluation
 
@@ -114,14 +115,22 @@ root:
   --checkpoint training/runs/SELECTED/best.pt \
   --output models/kururi-orient-v2.onnx \
   --preprocess v2-whole224-bilinear-imagenet \
+  --batch-size 4 \
   --recommended-views 4
 ```
 
-The exporter validates the ONNX graph and checks PyTorch/ONNX Runtime parity on
-one tensor. This does not validate the complete image pipeline. Also compare
+Repeat the export for each selected model and retain its adjacent `.onnx.data`
+file. The exporter reads declared input size from the checkpoint and validates
+224, 288, or 384 pixels. It validates the ONNX graph and checks
+PyTorch/ONNX Runtime parity. This does not validate the complete image pipeline.
+Also compare
 real held-out input tensors, logits, final classes, EXIF handling and saved
 orientation through the Rust executable. Report any changed predictions caused
 by image decoding and resampling.
+
+Evaluate the weighted probability ensemble and cascade trigger together. Do not
+select the ensemble weights on the test split. Keep the four rotations grouped
+under their source image for uncertainty estimates.
 
 The selected v2 model supports JPEG, PNG, WebP, TIFF and BMP inputs in the
 native runtime. Training used canonical conversions of HEIC and RAW previews;

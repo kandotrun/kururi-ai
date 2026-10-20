@@ -5,6 +5,7 @@
 __pycache__/
 *.py[cod]
 /native/target/
+/native/target-*/
 /native/smoke-report.json
 /native/smoke-*/
 /training/runs/

@@ -15,27 +15,29 @@ to new v2 weights or third-party runtime dependencies.
 
 ## v2 pretrained weights and modifications
 
-The v2 release asset contains a derivative of
-[convnext_tiny.fb_in22k_ft_in1k](https://huggingface.co/timm/convnext_tiny.fb_in22k_ft_in1k/blob/bc48a87f119bae1b06418f5340bfa97ef75d4609/README.md),
-revision `bc48a87f119bae1b06418f5340bfa97ef75d4609`. Its card attributes
-ImageNet-22k pretraining and ImageNet-1k fine-tuning to the paper authors
-(Meta/Facebook Research), with a timm conversion, and declares Apache-2.0.
-Include the selected upstream model card, provenance JSON, and
-[Apache-2.0 license](licenses/Apache-2.0.txt) with redistributed derivative
+The v2 release contains derivatives of
+[convnext_base.fb_in22k_ft_in1k](https://huggingface.co/timm/convnext_base.fb_in22k_ft_in1k)
+and
+[convnext_small.fb_in22k_ft_in1k](https://huggingface.co/timm/convnext_small.fb_in22k_ft_in1k).
+Their model cards attribute ImageNet-22k pretraining and ImageNet-1k
+fine-tuning to the paper authors (Meta/Facebook Research), with timm
+conversions, and declare Apache-2.0. Include the upstream model cards,
+provenance JSON files, and
+[Apache-2.0 license](licenses/Apache-2.0.txt) with the redistributed derivative
 weights. Preserve any applicable upstream notices.
 
-Kururi AI contributors replaced the ImageNet classification head with four
-orientation classes, fine-tuned the weights on privately held images, and
-exported the resulting model to ONNX. These are modifications to the upstream
-weights. Dataset images are not part of the model distribution and are not
-licensed by this repository.
+Kururi AI contributors replaced the ImageNet classification heads with four
+orientation classes, fine-tuned the weights, exported three models to ONNX,
+and combined them in a weighted cascade. These are modifications to the
+upstream weights. Dataset images are not part of the model distribution and are
+not licensed by this repository.
 
 ConvNeXt is described in
 [A ConvNet for the 2020s](https://arxiv.org/abs/2201.03545).
 The timm implementation is maintained in
 [pytorch-image-models](https://github.com/huggingface/pytorch-image-models).
-MobileNetV4 was evaluated during development but is not included in the v2
-release asset.
+MobileNetV4 and ConvNeXt-Tiny were evaluated during development but are not
+included in the v2 release asset.
 
 ## Native runtime
 

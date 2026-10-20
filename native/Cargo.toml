@@ -1,6 +1,6 @@
 [package]
 name = "kururi-native"
-version = "2.0.0-rc.1"
+version = "2.0.0"
 edition = "2024"
 description = "Local image-orientation inference and a measured raw-tensor ONNX harness"
 license = "MIT"

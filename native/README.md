@@ -1,103 +1,101 @@
-# Native runtime candidate
+# Kururi native runtime
 
-This is a local release candidate and benchmark harness. Its build and numeric
-validation status must be reported from actual checks, not inferred from source.
+`kururi-native` is the Rust release runtime for v2.0.0. It decodes an image,
+applies EXIF orientation once, runs a weighted ONNX ensemble, optionally saves a
+corrected copy, and reports structured timings and probabilities.
 
-## Scope
+## Release ensemble
 
-- `--tensor` takes exactly 602,112 bytes: little-endian FP32 NCHW `[1,3,224,224]`.
-  This is an inference harness and **excludes image decoding/preprocessing**.
-- `--image` decodes locally, applies EXIF orientation, converts RGB, resizes the
-  entire image to 224×224 using the Pillow 13 compatible RGB8 bilinear resampler,
-  normalizes with ImageNet mean
-  and standard deviation, and runs the model. It requires embedded v2 metadata.
-- The resampler follows Pillow 13's fixed-point coefficients and pass order;
-  see [resample-notes.md](resample-notes.md). Different image decoders may still
-  produce different pixels, so validate actual input formats before release.
-- `--output` writes only a new file. No original or existing file is overwritten.
-  Its pixels already have EXIF orientation applied; original EXIF/ICC metadata
-  is not copied. PNG output preserves alpha and bit depth. JPEG output is
-  re-encoded with image-rs's default quality 75 and is not lossless. Encoded
-  pixels are staged before an atomic no-clobber save; a failed encode leaves no
-  final output file.
-- The default confidence threshold is zero; `--min-confidence` allows abstention.
-  Softmax confidence is not yet calibrated, so this is not a safety guarantee.
-- `internal_total_ms` begins inside Rust `main` and excludes process launching,
-  executable loader setup, JSON printing and process teardown. It includes the
-  explicit ONNX Runtime library load under `environment_ms`. Measure wall time
-  around each new process separately for the user-facing single-image latency.
-- Timings from repeated `--runs` share one loaded session and input.
-- `--views` defaults to the model's embedded `kururi.recommended_views` value.
-  The selected ConvNeXt v2 candidate requires four views for its reported accuracy.
-  Four views rotate the preprocessed tensor, run four forwards, align class
-  probabilities and average them. Reports include all four inference durations.
-  An explicit `--views 1` override is experimental for that model and does not
-  carry its four-view accuracy claim.
-- CPU selection is explicit. ort 2.0.0-rc.15 otherwise automatically selects
-  Core ML on macOS via its default efficiency policy.
+```sh
+kururi-native predict \
+  --model models/convnext-base-224.onnx --model-weight 0.5 \
+  --model models/convnext-small-288.onnx --model-weight 0.4 \
+  --fallback-model models/convnext-small-224.onnx \
+  --fallback-weight 0.1 \
+  --fallback-margin 0.033333333 \
+  --parallel-models \
+  --threads 12 \
+  --image photo.jpg
+```
 
-## Commands
+The release launcher `scripts/kururi` supplies this configuration. Users
+normally need only:
+
+```sh
+./kururi predict --image photo.jpg
+```
+
+Each ONNX graph has static input `[4,3,S,S]` and output `[4,4]`. The four batch
+elements are rotations `[0,90,180,270]`. Softmax probabilities are aligned back
+to the input coordinate system before averaging. The two general models execute
+concurrently. The fallback graph is loaded lazily only when its probability
+margin rule fires.
+
+`--threads` is a total budget for the parallel general models. It defaults to
+the available CPU count capped at 12. For two models, the budget is split
+evenly. The fallback runs alone with the full budget.
+
+## Image and save behavior
+
+- Supported input: JPEG, PNG, WebP, TIFF, and BMP.
+- EXIF orientation is applied exactly once.
+- Native RGB resizing matches the validated Pillow 13 bilinear pipeline.
+- HEIC, DNG, NEF, and other RAW containers are not decoded.
+- `--output` writes only to a new file and uses an atomic no-clobber save.
+- PNG alpha and 16-bit grayscale are preserved.
+- Saved outputs do not retain source EXIF/ICC metadata.
+- JPEG output uses the image-rs encoder's quality 75 and is not lossless.
+- `--output-dir` preserves relative paths and skips symlinks.
+- A directory run returns exit code 2 if any supported image fails.
+
+`--min-confidence` controls abstention and prevents saving below its threshold.
+The default is zero. The score is uncalibrated.
+
+## Build
 
 ```sh
 cargo build --release --locked
-./target/release/kururi-native predict --model model.onnx --tensor input.f32 --threads 1 --runs 1
-./target/release/kururi-native predict --model model.onnx --image photo.jpg
-./target/release/kururi-native predict --model model.onnx --dir ./photos
-./target/release/kururi-native predict --image photo.jpg --preprocess-only --write-input input.f32
+cargo test --locked
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Runtime setup for local development:
+At runtime, provide ONNX Runtime 1.31 with API 31. The default search path is a
+`libonnxruntime.dylib`, `libonnxruntime.so`, or `onnxruntime.dll` beside the
+executable. `--runtime-library` and `ORT_DYLIB_PATH` override that path.
 
-```sh
-# Install onnxruntime==1.31.0 in a Python environment, then copy its native library:
-cp /path/to/site-packages/onnxruntime/capi/libonnxruntime.1.31.0.dylib \
-  target/release/libonnxruntime.dylib
-```
+The exported graphs require their adjacent `.onnx.data` files. Do not copy only
+the `.onnx` graph.
 
-On Linux use the wheel's `libonnxruntime.so.*`, installed next to the executable
-as `libonnxruntime.so`. `--runtime-library PATH` or `ORT_DYLIB_PATH` overrides this
-search. The Python environment is only a source of the runtime library; the
-packaged executable does not import Python. Include ONNX Runtime's `LICENSE` and
-`ThirdPartyNotices.txt` when redistributing its library.
+## Export
 
-Export a frozen v2 checkpoint in a Python environment containing PyTorch, timm,
-ONNX, ONNXScript, and ONNX Runtime:
+Export uses a batch size of four and embeds model metadata validated by the
+runtime:
 
 ```sh
 python export_onnx.py \
-  --checkpoint /path/to/frozen-best.pt \
-  --output models/kururi-v2.onnx \
+  --checkpoint /path/to/best.pt \
+  --output models/convnext-small-288.onnx \
   --preprocess v2-whole224-bilinear-imagenet \
+  --batch-size 4 \
   --recommended-views 4
 ```
 
-Export v1 only as a control, preserving its existing architecture and class order:
+Checkpoints declare the expected 224, 288, or 384 input size. The exporter uses
+FP32, eval mode, opset 18, external data, ONNX validation, and a
+PyTorch/ONNX Runtime parity check.
+
+## Verification
 
 ```sh
-python export_onnx.py \
-  --checkpoint /path/to/kururi-orient-v1.pth \
-  --model-name vit_large_patch16_224 \
-  --output models/kururi-v1.onnx \
-  --preprocess v1-autocrop224-no-normalization
+python smoke_tests.py \
+  --binary target/release/kururi-native \
+  --report smoke-report.json
 ```
 
-Keep any `.onnx.data` file beside the `.onnx` file. `export_onnx.py` uses the
-checkpoint's exact weights, static batch one, FP32, eval mode, opset 18, external
-data, ONNX validation and a single-tensor PyTorch/ONNX Runtime CPU parity check.
-Runtime validation must additionally check real image tensors.
-The adjacent `.metadata.json` records the pipeline, class order and model hashes;
-the executable validates preprocessing and class semantics embedded in ONNX.
-Directory processing skips unsupported formats and symlinks, preserves relative
-paths under a new output directory, and returns exit code 2 for per-image errors.
+The synthetic suite covers EXIF orientation, save semantics, no-clobber atomic
+writes, PNG alpha and 16-bit grayscale, abstention, recursive input, symlink
+handling, raw-tensor refusal rules, Pillow-identical resizing, weighted
+ensembles, and metadata checks. It does not establish trained-model accuracy.
 
-## API provenance
-
-- ort pinned `2.0.0-rc.15`, ONNX Runtime `1.31.0`; APIs inspected in the downloaded
-  crate and [official docs](https://docs.rs/ort/2.0.0-rc.15/ort/session/struct.Session.html).
-- image pinned `0.25.10`; EXIF decoder orientation and `apply_orientation` inspected
-  in its downloaded source and [official docs](https://docs.rs/image/0.25.10/image/).
-- The executable links a native ONNX Runtime library. Packaging must include its
-  required dynamic library and license/notice files; a binary alone is insufficient.
-- The runtime is explicitly loaded at startup. The crate's prebuilt static runtime
-  failed to link on this Mac with `___isPlatformVersionAtLeast` unresolved; the
-  matching official ONNX Runtime 1.31 Python wheel's dynamic library was verified.
+Private photo manifests and per-image predictions must remain outside the
+repository and public release archives.

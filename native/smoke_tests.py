@@ -277,8 +277,9 @@ def main() -> None:
         ensemble = run("--model", model, "--tensor", tensor, "--views", "4")
         assert ensemble["views"] == 4 and ensemble["total_forward_passes"] == 4
         assert (
-            len(ensemble["view_logits"]) == 4
-            and len(ensemble["per_view_inference_ms"][0]) == 4
+            ensemble["models"] == 1
+            and len(ensemble["model_results"]) == 1
+            and len(ensemble["model_results"][0]["logits"]) == 4
         )
         assert np.allclose(
             ensemble["probabilities"], [0.25, 0.25, 0.25, 0.25], atol=1e-6
@@ -289,6 +290,56 @@ def main() -> None:
         checks.append(
             "Four-view execution reports four forwards and aligned probability averaging"
         )
+
+        second_model = root / "fixture-second.onnx"
+        second_graph = helper.make_graph(
+            [
+                helper.make_node(
+                    "Constant",
+                    [],
+                    ["logits"],
+                    value=numpy_helper.from_array(
+                        np.array([[0, 0, 0, 8]], dtype=np.float32)
+                    ),
+                )
+            ],
+            "constant-class-three-io-test",
+            [
+                helper.make_tensor_value_info(
+                    "images", TensorProto.FLOAT, [1, 3, 224, 224]
+                )
+            ],
+            [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4])],
+        )
+        second_graph_model = helper.make_model(
+            second_graph,
+            opset_imports=[helper.make_opsetid("", 18)],
+            ir_version=10,
+        )
+        helper.set_model_props(
+            second_graph_model,
+            {
+                "kururi.preprocess": "v2-whole224-bilinear-imagenet",
+                "kururi.class_order": "0,90,180,270",
+                "kururi.class_semantics": "correction_clockwise_degrees",
+            },
+        )
+        onnx.save(second_graph_model, second_model)
+        weighted = run(
+            "--model",
+            model,
+            "--model-weight",
+            "0.75",
+            "--model",
+            second_model,
+            "--model-weight",
+            "0.25",
+            "--tensor",
+            tensor,
+        )
+        assert weighted["models"] == 2 and weighted["class"] == 1, weighted
+        assert weighted["probabilities"][1] > weighted["probabilities"][3]
+        checks.append("Repeated model inputs and per-model weights form a weighted ensemble")
 
         recommended_model = root / "recommended-four-views.onnx"
         helper.set_model_props(
