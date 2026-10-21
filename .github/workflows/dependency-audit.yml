@@ -22,7 +22,15 @@ jobs:
         working-directory: cli
         run: |
           uv export --frozen --no-dev --format requirements-txt --no-hashes --output-file "$RUNNER_TEMP/requirements.txt"
-          uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --progress-spinner off
+          uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --strict --progress-spinner off
+      - name: Audit native Python dependencies
+        run: |
+          uv pip compile native/requirements-native.txt --python-version 3.12 --quiet --output-file "$RUNNER_TEMP/native-requirements.txt"
+          uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit -r "$RUNNER_TEMP/native-requirements.txt" --no-deps --disable-pip --strict --progress-spinner off
+      - name: Audit training Python dependencies
+        run: |
+          uv pip compile training/requirements-training.txt --python-version 3.12 --quiet --output-file "$RUNNER_TEMP/training-requirements.txt"
+          uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit -r "$RUNNER_TEMP/training-requirements.txt" --no-deps --disable-pip --strict --progress-spinner off
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"

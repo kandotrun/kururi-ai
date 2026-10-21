@@ -24,12 +24,13 @@ audit findings. The native runtime lock has no matching RustSec advisories.
 
 ## Automated controls
 
-- Dependabot checks uv, Cargo, npm, and GitHub Actions weekly.
+- Dependabot checks uv, pip requirements, Cargo, npm, and GitHub Actions weekly.
 - Minor and patch version updates are grouped per ecosystem to limit review
   noise.
 - Security updates are not grouped or delayed by the weekly schedule.
 - Pull requests run GitHub Dependency Review and fail at high severity.
-- A weekly scheduled workflow runs `pip-audit`, `npm audit`, and RustSec Audit.
+- A weekly scheduled workflow runs `pip-audit` for the CLI, native tooling, and
+  training environment, plus `npm audit` and RustSec Audit.
 - GitHub Actions are pinned to reviewed commit SHAs, and the workflow token is
   read-only unless a deployment job explicitly needs Pages permissions.
 - Scheduled audit tooling is version-pinned so the audit job does not execute an
@@ -42,8 +43,21 @@ cd cli
 uv lock --check
 uv export --frozen --no-dev --format requirements-txt --no-hashes \
   --output-file /tmp/kururi-requirements.txt
-uvx --python 3.12 pip-audit -r /tmp/kururi-requirements.txt \
-  --no-deps --disable-pip --progress-spinner off
+uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit \
+  -r /tmp/kururi-requirements.txt \
+  --no-deps --disable-pip --strict --progress-spinner off
+
+uv pip compile ../native/requirements-native.txt --python-version 3.12 \
+  --quiet --output-file /tmp/kururi-native-requirements.txt
+uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit \
+  -r /tmp/kururi-native-requirements.txt \
+  --no-deps --disable-pip --strict --progress-spinner off
+
+uv pip compile ../training/requirements-training.txt --python-version 3.12 \
+  --quiet --output-file /tmp/kururi-training-requirements.txt
+uvx --python 3.12 --from "pip-audit==2.10.1" pip-audit \
+  -r /tmp/kururi-training-requirements.txt \
+  --no-deps --disable-pip --strict --progress-spinner off
 
 cd ../web
 npm audit --audit-level=low
