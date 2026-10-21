@@ -1,0 +1,101 @@
+name: V2 balanced benchmark
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/v2-balanced-benchmark.yml"
+      - "scripts/benchmark_v2_balanced.py"
+  push:
+    branches: ["codex/v2-balanced-intel-bench"]
+    paths:
+      - ".github/workflows/v2-balanced-benchmark.yml"
+      - "scripts/benchmark_v2_balanced.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.9"
+          cache: "pip"
+      - name: Install benchmark dependencies
+        run: python -m pip install numpy==2.5.4 onnx==1.23.2 onnxruntime==1.31.0
+      - name: Download release models
+        run: |
+          mkdir -p reports
+          curl -L --fail --retry 3 \
+            -o "$RUNNER_TEMP/model.tar.gz" \
+            https://github.com/kandotrun/kururi-ai/releases/download/v2.0.0/kururi-ai-v2.0.0-model.tar.gz
+          echo "926b2cd721beae5cbe435f6ea1396d8052200f100d72e71ae2476dddce22b819  $RUNNER_TEMP/model.tar.gz" \
+            | sha256sum --check -
+          mkdir -p fp32
+          tar -xzf "$RUNNER_TEMP/model.tar.gz" -C fp32 --strip-components=1 \
+            models/convnext-base-224.onnx \
+            models/convnext-base-224.onnx.data \
+            models/convnext-small-288.onnx \
+            models/convnext-small-288.onnx.data \
+            models/convnext-small-224.onnx \
+            models/convnext-small-224.onnx.data
+      - name: Prepare dynamic INT8 models
+        run: |
+          python scripts/benchmark_v2_balanced.py \
+            --model-dir fp32 \
+            --mode dynamic-int8 \
+            --threads 1 \
+            --trials 1 \
+            --output reports/prepare.json \
+            --prepare-dynamic \
+            --prepare-only
+      - name: Benchmark FP32 and dynamic INT8
+        run: |
+          for mode in fp32 dynamic-int8; do
+            model_dir=fp32
+            if [ "$mode" = "dynamic-int8" ]; then
+              model_dir=reports/dynamic-int8
+            fi
+            for threads in 1 2 4 8; do
+              python scripts/benchmark_v2_balanced.py \
+                --model-dir "$model_dir" \
+                --mode "$mode" \
+                --threads "$threads" \
+                --trials 20 \
+                --low-memory \
+                --output "reports/${mode}-t${threads}.json"
+            done
+          done
+      - name: Summarize
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from os import environ
+
+          rows = []
+          for path in sorted(Path("reports").glob("*-t*.json")):
+              report = json.loads(path.read_text())
+              rows.append(
+                  {
+                      "mode": report["mode"],
+                      "threads": report["threads"],
+                      "p50_ms": round(report["latency_ms"]["median"], 2),
+                      "p95_ms": round(report["latency_ms"]["p95"], 2),
+                      "peak_rss_mib": round(report["peak_rss_mib"], 1),
+                  }
+              )
+          print(json.dumps(rows, indent=2))
+          with open(environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("| Mode | Threads | p50 ms | p95 ms | Peak RSS MiB |\n")
+              summary.write("|---|---:|---:|---:|---:|\n")
+              for row in rows:
+                  summary.write(
+                      f"| {row['mode']} | {row['threads']} | {row['p50_ms']} | "
+                      f"{row['p95_ms']} | {row['peak_rss_mib']} |\n"
+                  )
+          PY
