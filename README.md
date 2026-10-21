@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/readme-hero.svg" width="100%" alt="Sideways and upside-down photo prints on a green cutting mat get a red 天 (top) mark, turn in quarter steps until upright, and line up in a tidy grid">
+
 # Kururi AI
 
 **Puts sideways and upside-down photos the right way up.**
