@@ -25,6 +25,7 @@ file paths. Use synthetic files when possible.
 
 - Python, Cargo, npm, and GitHub Actions dependencies are reviewed weekly by
   Dependabot with grouped version updates and immediate security updates.
+- GitHub Actions are pinned to reviewed commit SHAs rather than mutable tags.
 - Pull requests run GitHub dependency review and fail on high-severity changes.
 - A weekly audit checks locked Python, Rust, and npm dependencies.
 - The native runtime uses explicit ONNX metadata validation, no-overwrite output

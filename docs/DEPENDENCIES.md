@@ -30,8 +30,10 @@ audit findings. The native runtime lock has no matching RustSec advisories.
 - Security updates are not grouped or delayed by the weekly schedule.
 - Pull requests run GitHub Dependency Review and fail at high severity.
 - A weekly scheduled workflow runs `pip-audit`, `npm audit`, and RustSec Audit.
-- GitHub Actions use current major releases and the workflow token is read-only
-  unless a deployment job explicitly needs Pages permissions.
+- GitHub Actions are pinned to reviewed commit SHAs, and the workflow token is
+  read-only unless a deployment job explicitly needs Pages permissions.
+- Scheduled audit tooling is version-pinned so the audit job does not execute an
+  arbitrary latest release.
 
 ## Local verification
 
