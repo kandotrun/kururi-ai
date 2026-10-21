@@ -27,7 +27,8 @@ file paths. Use synthetic files when possible.
   Dependabot with grouped version updates and immediate security updates.
 - GitHub Actions are pinned to reviewed commit SHAs rather than mutable tags.
 - Pull requests run GitHub dependency review and fail on high-severity changes.
-- A weekly audit checks locked Python, Rust, and npm dependencies.
+- A weekly audit checks Python, Rust, and npm dependencies across the CLI,
+  native tooling, training environment, and web demo.
 - The native runtime uses explicit ONNX metadata validation, no-overwrite output
   paths, atomic staged writes, bounded session metadata, and a fixed runtime API.
 - The browser demo performs inference locally and has no upload endpoint.
