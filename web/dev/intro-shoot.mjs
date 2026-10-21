@@ -20,7 +20,7 @@ const viewports = {
   mobile: { width: 390, height: 844 },
 };
 
-const gpuArgs = ["--enable-unsafe-swiftshader", "--use-angle=metal", "--enable-gpu"];
+const gpuArgs = ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-angle=metal"];
 const browser = await chromium.launch({
   headless: true,
   args: process.env.INTRO_SWIFTSHADER === "1" ? ["--enable-unsafe-swiftshader"] : gpuArgs,

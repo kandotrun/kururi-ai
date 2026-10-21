@@ -1,4 +1,4 @@
-import type { DeskScene, Quarter } from "../src/contracts";
+import type { DeskScene, Quarter, ViewInsets } from "../src/contracts";
 import { spiralCell } from "../src/core/layout";
 import { mulberry32, type Random } from "../src/core/random";
 import { expectedCorrection, pickSimulated } from "../src/core/rotation";
@@ -31,9 +31,16 @@ type OpeningPhase = "gathering" | "holding" | "released";
 interface OpeningReport {
   prints: number;
   inView: number;
+  inFree: number;
   minAcrossPx: number;
   minAlongPx: number;
   medianAcrossPx: number;
+}
+
+interface FreeReport {
+  prints: number;
+  inFree: number;
+  outside: string[];
 }
 
 interface HarnessProgress {
@@ -60,6 +67,11 @@ interface HarnessProgress {
   focus(id: string | null): void;
   select(id: string | null): void;
   openingReport(): OpeningReport | null;
+  freeReport(ids?: string[]): FreeReport | null;
+  setInsets(insets: ViewInsets | string): void;
+  addVisitors(count: number): void;
+  visitorIds: string[];
+  focused: string | null;
   screenPosition(id: string): { x: number; y: number } | null;
   stats(): unknown;
   loseContext(): boolean;
@@ -299,6 +311,69 @@ const showHud = params.get("hud") === "1";
 const openingBatch = Math.max(0, Math.floor(numberParam("opening", 36)));
 const holdMs = Math.max(0, numberParam("hold", 2000));
 const beatMs = reduced ? 0 : 280;
+const insetParam = params.get("insets") ?? "none";
+const visitorCount = Math.max(0, Math.floor(numberParam("visitors", 0)));
+const visitorAt = Math.max(0, Math.floor(numberParam("visitorAt", 60)));
+
+const INSET_PRESETS: Record<string, (width: number) => ViewInsets> = {
+  none: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+  ui: (width) =>
+    width >= 720
+      ? { top: 64, right: 0, bottom: 68, left: Math.min(520, width * 0.36) }
+      : { top: 236, right: 0, bottom: 272, left: 0 },
+};
+
+let currentInsets: ViewInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+function parseInsets(value: string): ViewInsets {
+  const preset = INSET_PRESETS[value];
+  if (preset) {
+    return preset(window.innerWidth);
+  }
+  const parts = value.split(",").map((part) => Number(part));
+  const [top = 0, right = 0, bottom = 0, left = 0] = parts;
+  return { top, right, bottom, left };
+}
+
+function drawInsets(insets: ViewInsets): void {
+  const layer = document.getElementById("ui-mock");
+  if (!layer) {
+    return;
+  }
+  layer.replaceChildren();
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const blocks: [number, number, number, number][] = [
+    [0, 0, width, insets.top],
+    [0, height - insets.bottom, width, insets.bottom],
+    [0, insets.top, insets.left, height - insets.top - insets.bottom],
+    [
+      width - insets.right,
+      insets.top,
+      insets.right,
+      height - insets.top - insets.bottom,
+    ],
+  ];
+  for (const [x, y, w, h] of blocks) {
+    if (w <= 0 || h <= 0) {
+      continue;
+    }
+    const block = document.createElement("div");
+    block.className = "ui-block";
+    block.style.left = `${x}px`;
+    block.style.top = `${y}px`;
+    block.style.width = `${w}px`;
+    block.style.height = `${h}px`;
+    layer.append(block);
+  }
+  const free = document.createElement("div");
+  free.className = "ui-free";
+  free.style.left = `${insets.left}px`;
+  free.style.top = `${insets.top}px`;
+  free.style.width = `${width - insets.left - insets.right}px`;
+  free.style.height = `${height - insets.top - insets.bottom}px`;
+  layer.append(free);
+}
 
 const random: Random = mulberry32(seed);
 
@@ -326,6 +401,11 @@ const progress: HarnessProgress = {
   focus: () => undefined,
   select: () => undefined,
   openingReport: () => null,
+  freeReport: () => null,
+  setInsets: () => undefined,
+  addVisitors: () => undefined,
+  visitorIds: [],
+  focused: null,
   screenPosition: () => null,
   stats: () => null,
   loseContext: () => false,
@@ -545,6 +625,18 @@ async function run(): Promise<void> {
   progress.focus = (id) => scene.focus(id);
   progress.select = (id) => scene.select(id);
   progress.openingReport = () => openingReport(scene, canvas);
+  progress.freeReport = (ids) => freeReport(scene, ids ?? progress.ids);
+  progress.setInsets = (value) => {
+    currentInsets = typeof value === "string" ? parseInsets(value) : value;
+    drawInsets(currentInsets);
+    scene.setViewInsets(currentInsets);
+  };
+  progress.setInsets(insetParam);
+  window.addEventListener("resize", () => {
+    if (INSET_PRESETS[insetParam]) {
+      progress.setInsets(insetParam);
+    }
+  });
   progress.screenPosition = (id) => scene.screenPosition(id);
   progress.stats = () => deskSceneStats(scene);
   progress.measure = (seconds) => measureFrames(scene, seconds);
@@ -577,6 +669,34 @@ async function run(): Promise<void> {
   }
 
   const sources = buildSources().slice(0, scene.capacity);
+  const visitorQueue: { index: number; source: HarnessSource }[] = [];
+  let visitorSerial = 0;
+  progress.addVisitors = (count) => {
+    for (let step = 0; step < count; step += 1) {
+      const sample = SAMPLES[visitorSerial % SAMPLES.length];
+      const index = 100_000 + visitorSerial;
+      visitorSerial += 1;
+      visitorQueue.push({
+        index,
+        source:
+          visitorSerial % 3 === 0 && sample
+            ? {
+                kind: "sample",
+                url: `${import.meta.env.BASE_URL}samples/${sample.file}`,
+                aspect: sample.aspect,
+                uprightFix: sample.uprightFix,
+                label: sample.file,
+              }
+            : {
+                kind: "synthetic",
+                url: null,
+                aspect: [1.333, 0.75, 1.5, 1][visitorSerial % 4] ?? 1.333,
+                uprightFix: 0,
+                label: `visitor-${visitorSerial}`,
+              },
+      });
+    }
+  };
   const local = mulberry32(seed * 31 + 7);
   let nextSlot = 0;
   let pile = 0;
@@ -611,15 +731,18 @@ async function run(): Promise<void> {
       ? maxPile
       : Math.max(maxPile, openingTarget);
 
-  const acquireWorker = (): Promise<void> => {
+  const visitorWorkerQueue: (() => void)[] = [];
+  const acquireWorker = (visitor: boolean): Promise<void> => {
     if (idleWorkers > 0) {
       idleWorkers -= 1;
       return Promise.resolve();
     }
-    return new Promise((resolve) => workerQueue.push(resolve));
+    return new Promise((resolve) =>
+      (visitor ? visitorWorkerQueue : workerQueue).push(resolve),
+    );
   };
   const releaseWorker = (): void => {
-    const next = workerQueue.shift();
+    const next = visitorWorkerQueue.shift() ?? workerQueue.shift();
     if (next) {
       next();
     } else {
@@ -630,16 +753,20 @@ async function run(): Promise<void> {
   const processOne = async (
     index: number,
     source: HarnessSource,
+    visitor: boolean,
   ): Promise<void> => {
-    const id = `print-${index}`;
+    const id = visitor ? `visitor-${index}` : `print-${index}`;
     const simulated: Quarter =
-      source.kind === "sample" ? 0 : pickSimulated(local);
+      source.kind === "sample" || visitor ? 0 : pickSimulated(local);
     loading += 1;
     const { image, aspect } = await loadBitmap(source, index, scene.tileSize);
     loading -= 1;
     pile += 1;
     progress.added += 1;
     progress.ids.push(id);
+    if (visitor) {
+      progress.visitorIds.push(id);
+    }
     const slot = nextSlot;
     nextSlot += 1;
     try {
@@ -649,7 +776,7 @@ async function run(): Promise<void> {
         aspect,
         simulated,
         image,
-        emphasis: index === focusAt,
+        emphasis: visitor || index === focusAt,
       });
     } catch (error) {
       pile -= 1;
@@ -657,16 +784,19 @@ async function run(): Promise<void> {
     }
     progress.landed += 1;
     updateOpening();
-    if (index === focusAt) {
+    if (visitor || index === focusAt) {
+      progress.focused = id;
       scene.focus(id);
     }
     await waitForRelease();
-    await acquireWorker();
+    await acquireWorker(visitor);
     scene.setScanning(id, true);
     await wait(inferMs * (0.8 + local() * 0.4));
     scene.setScanning(id, false);
     releaseWorker();
-    const right = expectedCorrection(source.uprightFix, simulated);
+    const right = visitor
+      ? (((4 - Math.floor(local() * 4)) % 4) as Quarter)
+      : expectedCorrection(source.uprightFix, simulated);
     const isRight = local() < accuracy;
     const correction = isRight ? right : wrongCorrection(right, local);
     if (isRight) {
@@ -678,28 +808,46 @@ async function run(): Promise<void> {
     pile -= 1;
     await scene.place(id, slot);
     progress.placed += 1;
-    if (index === focusAt) {
+    if (visitor || index === focusAt) {
       await wait(1500);
-      scene.focus(null);
+      if (progress.focused === id) {
+        progress.focused = null;
+        scene.focus(null);
+      }
     }
   };
 
   const interval = 1000 / rate;
-  for (let index = 0; index < sources.length; index += 1) {
-    const source = sources[index];
-    if (!source) {
+  let visitorsQueued = visitorCount === 0;
+  let index = 0;
+  while (index < sources.length || visitorQueue.length > 0) {
+    if (!visitorsQueued && progress.placed >= visitorAt) {
+      visitorsQueued = true;
+      progress.addVisitors(visitorCount);
+    }
+    const visitor = visitorQueue.shift();
+    const next = visitor ?? { index, source: sources[index] };
+    if (!visitor) {
+      index += 1;
+    }
+    if (!next.source) {
       continue;
     }
-    while (pile >= pileLimit() || loading >= maxLoading) {
+    while (
+      (pile >= pileLimit() && !visitor) ||
+      loading >= maxLoading
+    ) {
       await wait(20);
     }
     pending.push(
-      processOne(index, source).catch((error: unknown) => {
-        progress.failed += 1;
-        progress.error = String(error);
-      }),
+      processOne(next.index, next.source, visitor !== undefined).catch(
+        (error: unknown) => {
+          progress.failed += 1;
+          progress.error = String(error);
+        },
+      ),
     );
-    await wait(interval);
+    await wait(visitor ? interval * 0.5 : interval);
   }
   await Promise.all(pending);
   progress.finished = true;
@@ -719,6 +867,7 @@ function openingReport(
   const across: number[] = [];
   const along: number[] = [];
   let inView = 0;
+  let inFree = 0;
   const count = Math.min(openingBatch, progress.landed);
   for (let slot = 0; slot < count; slot += 1) {
     const cell = spiralCell(slot);
@@ -742,6 +891,9 @@ function openingReport(
     ) {
       inView += 1;
     }
+    if (corners.every((point) => insideFree(point))) {
+      inFree += 1;
+    }
     across.push(Math.hypot(right.x - left.x, right.y - left.y));
     along.push(Math.hypot(near.x - far.x, near.y - far.y));
   }
@@ -749,10 +901,35 @@ function openingReport(
   return {
     prints: count,
     inView,
+    inFree,
     minAcrossPx: Math.min(...across),
     minAlongPx: Math.min(...along),
     medianAcrossPx: sorted[Math.floor(sorted.length / 2)] ?? 0,
   };
+}
+
+function insideFree(point: { x: number; y: number }): boolean {
+  const insets = currentInsets;
+  return (
+    point.x >= insets.left - 1 &&
+    point.x <= window.innerWidth - insets.right + 1 &&
+    point.y >= insets.top - 1 &&
+    point.y <= window.innerHeight - insets.bottom + 1
+  );
+}
+
+function freeReport(scene: DeskScene, ids: string[]): FreeReport {
+  const outside: string[] = [];
+  let inFree = 0;
+  for (const id of ids) {
+    const point = scene.screenPosition(id);
+    if (point && insideFree(point)) {
+      inFree += 1;
+    } else {
+      outside.push(id);
+    }
+  }
+  return { prints: ids.length, inFree, outside: outside.slice(0, 12) };
 }
 
 function measureFrames(

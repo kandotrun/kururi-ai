@@ -1,6 +1,8 @@
 import type { DeskPose, NewPrint, Quarter } from "../contracts";
 import {
+  type BandBox,
   CROOKED_LAYERS,
+  type GridCell,
   crookedLayer,
   crookedPose,
   printSize,
@@ -9,6 +11,7 @@ import {
 import {
   FALL_SECONDS,
   FLIGHT_SECONDS,
+  MARK_WRITE_SECONDS,
   REDUCED_FADE_SECONDS,
   REDUCED_SLIDE_SECONDS,
   STRAIGHTEN_LIFT,
@@ -24,6 +27,7 @@ import {
   placedYaw,
   replayDelay,
   slidePose,
+  straightenStart,
   turnInPlacePose,
 } from "../core/motion";
 import type { Random } from "../core/random";
@@ -71,14 +75,15 @@ export interface PrintEntry {
   scanEnd: number;
   fadeStart: number;
   fadeDuration: number;
+  markStart: number;
 }
 
-export interface BandExtent {
+export type BandExtent = BandBox;
+
+export interface BandAction extends GridCell {
   count: number;
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
+  oldest: number;
+  slot: number;
 }
 
 export interface PrintFleetOptions {
@@ -100,7 +105,11 @@ const REDUCED_SCATTER_HOLD_SECONDS = 0.6;
 const RESTRAIGHTEN_LIFT = STRAIGHTEN_LIFT * 0.75;
 const SCAN_MIN_SECONDS = 0.8;
 const SCAN_FADE_SECONDS = 0.4;
-const MARK_WRITE_SECONDS = 0.45;
+const MARK_EFFECT_SECONDS = MARK_WRITE_SECONDS + 0.1;
+const PLACE_INTERVAL_START = 1;
+const PLACE_INTERVAL_MIN = 0.02;
+const PLACE_INTERVAL_MAX = 3;
+const PLACE_INTERVAL_WEIGHT = 0.12;
 const MARK_TILT = (6 * Math.PI) / 180;
 
 const BAND_PHASES: ReadonlySet<PrintPhase> = new Set<PrintPhase>([
@@ -109,6 +118,65 @@ const BAND_PHASES: ReadonlySet<PrintPhase> = new Set<PrintPhase>([
   "straightening",
   "flying",
 ]);
+
+function resetBand(band: BandExtent): void {
+  band.count = 0;
+  band.minX = Number.POSITIVE_INFINITY;
+  band.maxX = Number.NEGATIVE_INFINITY;
+  band.minZ = Number.POSITIVE_INFINITY;
+  band.maxZ = Number.NEGATIVE_INFINITY;
+}
+
+function resetAction(action: BandAction): void {
+  action.count = 0;
+  action.oldest = Number.POSITIVE_INFINITY;
+  action.x = 0;
+  action.z = 0;
+  action.slot = 0;
+}
+
+function noteAction(
+  action: BandAction,
+  slot: number,
+  x: number,
+  z: number,
+  busy: boolean,
+): void {
+  if (busy) {
+    if (action.count === 0) {
+      action.x = 0;
+      action.z = 0;
+      action.slot = 0;
+    }
+    action.count += 1;
+    action.x += x;
+    action.z += z;
+    action.slot += slot;
+    return;
+  }
+  if (action.count === 0 && slot < action.oldest) {
+    action.oldest = slot;
+    action.x = x;
+    action.z = z;
+    action.slot = slot;
+  }
+}
+
+function settleAction(action: BandAction): void {
+  if (action.count > 0) {
+    action.x /= action.count;
+    action.z /= action.count;
+    action.slot /= action.count;
+  }
+}
+
+function growBand(band: BandExtent, x: number, z: number): void {
+  band.count += 1;
+  band.minX = Math.min(band.minX, x);
+  band.maxX = Math.max(band.maxX, x);
+  band.minZ = Math.min(band.minZ, z);
+  band.maxZ = Math.max(band.maxZ, z);
+}
 
 export class PrintFleet {
   private readonly pages: PrintPages;
@@ -130,6 +198,7 @@ export class PrintFleet {
   highestSlot = -1;
   placedCount = 0;
   lastPlacedAt = Number.NEGATIVE_INFINITY;
+  private placeInterval = PLACE_INTERVAL_START;
   scanningCount = 0;
   effectsUntil = 0;
 
@@ -185,23 +254,35 @@ export class PrintFleet {
     this.finishAll();
   }
 
-  bandExtent(out: BandExtent): BandExtent {
-    out.count = 0;
-    out.minX = Number.POSITIVE_INFINITY;
-    out.maxX = Number.NEGATIVE_INFINITY;
-    out.minZ = Number.POSITIVE_INFINITY;
-    out.maxZ = Number.NEGATIVE_INFINITY;
+  bandExtent(
+    out: BandExtent,
+    visitors: BandExtent,
+    action: BandAction,
+    visitorAction: BandAction,
+  ): number {
+    resetBand(out);
+    resetBand(visitors);
+    resetAction(action);
+    resetAction(visitorAction);
+    let falling = 0;
     for (const entry of this.loose) {
+      if (entry.phase === "falling") {
+        falling += 1;
+      }
       if (BAND_PHASES.has(entry.phase)) {
         const pose = entry.crooked;
-        out.count += 1;
-        out.minX = Math.min(out.minX, pose.x);
-        out.maxX = Math.max(out.maxX, pose.x);
-        out.minZ = Math.min(out.minZ, pose.z);
-        out.maxZ = Math.max(out.maxZ, pose.z);
+        const busy = entry.scanning || entry.phase === "straightening";
+        growBand(out, pose.x, pose.z);
+        noteAction(action, entry.slot, pose.x, pose.z, busy);
+        if (entry.emphasis) {
+          growBand(visitors, pose.x, pose.z);
+          noteAction(visitorAction, entry.slot, pose.x, pose.z, busy);
+        }
       }
     }
-    return out;
+    settleAction(action);
+    settleAction(visitorAction);
+    return falling;
   }
 
   add(print: NewPrint): Promise<void> {
@@ -242,6 +323,7 @@ export class PrintFleet {
       scanEnd: 0,
       fadeStart: 0,
       fadeDuration: 0,
+      markStart: Number.NEGATIVE_INFINITY,
     };
     this.entries.set(entry.id, entry);
     this.loose.add(entry);
@@ -308,6 +390,7 @@ export class PrintFleet {
     const random = this.random;
     entry.correction = correction;
     const start = this.reduced ? now - 1 : now + 0.04;
+    entry.markStart = start;
     this.pages.writeMark(
       entry.index,
       markSide(entry.simulated, correction),
@@ -315,7 +398,10 @@ export class PrintFleet {
       (random() - 0.5) * 2 * MARK_TILT,
       (random() - 0.5) * 2,
     );
-    this.effectsUntil = Math.max(this.effectsUntil, start + MARK_WRITE_SECONDS);
+    this.effectsUntil = Math.max(
+      this.effectsUntil,
+      start + MARK_EFFECT_SECONDS,
+    );
   }
 
   place(entry: PrintEntry, slot: number): Promise<void> {
@@ -362,7 +448,7 @@ export class PrintFleet {
       finished = this.startMotion(
         entry,
         "turn",
-        now,
+        straightenStart(now, entry.markStart),
         STRAIGHTEN_SECONDS,
         STRAIGHTEN_LIFT,
         goal,
@@ -462,6 +548,23 @@ export class PrintFleet {
       entry.landed = null;
       landed?.();
     }
+  }
+
+  placementRate(now: number): number {
+    const quiet = now - this.lastPlacedAt;
+    const interval = Math.max(this.placeInterval, quiet);
+    return interval > PLACE_INTERVAL_MAX ? 0 : 1 / interval;
+  }
+
+  private notePlacement(now: number): void {
+    const interval = now - this.lastPlacedAt;
+    if (Number.isFinite(interval)) {
+      const bounded = Math.max(0, Math.min(PLACE_INTERVAL_MAX, interval));
+      this.placeInterval +=
+        (bounded - this.placeInterval) * PLACE_INTERVAL_WEIGHT;
+      this.placeInterval = Math.max(PLACE_INTERVAL_MIN, this.placeInterval);
+    }
+    this.lastPlacedAt = now;
   }
 
   private settleIfLost(): void {
@@ -570,7 +673,7 @@ export class PrintFleet {
         this.placedCount += 1;
       }
       if (phase !== "scatter-back") {
-        this.lastPlacedAt = now;
+        this.notePlacement(now);
       }
     } else if (phase === "scatter-out") {
       entry.phase = "scattered";

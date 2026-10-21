@@ -169,6 +169,13 @@ export interface ScreenPoint {
   y: number;
 }
 
+export interface ViewInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export interface NewPrint {
   id: string;
   slot: number;
@@ -197,6 +204,7 @@ export interface DeskScene {
   select(id: string | null): void;
   screenPosition(id: string): ScreenPoint | null;
   setReducedMotion(reduced: boolean): void;
+  setViewInsets(insets: ViewInsets): void;
   on<K extends keyof DeskSceneEvents>(
     event: K,
     handler: DeskSceneEvents[K],
@@ -236,6 +244,7 @@ export interface OverlayHandlers {
   setSimulateUser(enabled: boolean): void;
   selectRecord(id: string | null): void;
   selectModel(id: ModelId): void;
+  skipIntro(): void;
 }
 
 export interface Overlay {
@@ -251,6 +260,17 @@ export interface Overlay {
   webglUnavailable(): void;
   simulateUser(): boolean;
   setModels(current: ModelId, options: readonly ModelOption[]): void;
+  setIntroActive(active: boolean): void;
+  viewInsets(): ViewInsets;
+  onViewInsetsChange(handler: (insets: ViewInsets) => void): () => void;
+  setFolderProgress(progress: FolderProgress | null): void;
+}
+
+export interface FolderProgress {
+  found: number;
+  accepted: number;
+  skipped: number;
+  done: boolean;
 }
 
 export interface Stream {

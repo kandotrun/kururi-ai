@@ -33,11 +33,13 @@ uniform float uJapanMix;
 uniform float uLights;
 uniform float uSun;
 uniform vec4 uJapanBounds;
+uniform float uDetail;
 
 varying vec2 vUv;
 varying vec3 vPos;
 
 ${SUN_GLSL}
+${NOISE_GLSL}
 
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
@@ -75,6 +77,14 @@ void main() {
 
   float nightAmount = 1.0 - smoothstep(-0.18, 0.04, mu);
   float lights = cityLight(night);
+  if (uDetail > 0.001) {
+    float coarse = valueNoise3(vPos * 900.0);
+    float fine = valueNoise3(vPos * 2600.0 + 7.0);
+    float speck = valueNoise3(vPos * 7000.0 + 3.0);
+    float sparkle = smoothstep(0.32, 0.95, coarse * 0.5 + fine * 0.35 + speck * 0.3);
+    float compress = 1.0 / (1.0 + lights * 2.4);
+    lights = mix(lights, lights * compress * (0.15 + 1.9 * sparkle), uDetail);
+  }
   vec3 lightColor = mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.8, 0.56), clamp(lights * 1.5, 0.0, 1.0));
   vec3 city = lightColor * (lights * 1.6 + lights * lights * 2.0) * uLights;
   float lum = dot(night, vec3(0.2126, 0.7152, 0.0722));
@@ -257,57 +267,94 @@ void main() {
 }
 `;
 
-export const ARC_VERTEX = `
-attribute float aS;
-attribute float aSide;
-attribute vec4 aA;
-attribute vec4 aB;
+export const CARD_PALETTE_GLSL = `
+vec3 palette(float seed, float layer) {
+  float pick = floor(fract(seed * 13.17 + layer * 0.37) * 6.0);
+  if (layer < 0.5) {
+    if (pick < 1.0) return vec3(0.42, 0.62, 0.86);
+    if (pick < 2.0) return vec3(0.96, 0.62, 0.34);
+    if (pick < 3.0) return vec3(0.58, 0.74, 0.86);
+    if (pick < 4.0) return vec3(0.82, 0.86, 0.88);
+    if (pick < 5.0) return vec3(0.3, 0.52, 0.8);
+    return vec3(0.98, 0.78, 0.5);
+  }
+  if (pick < 1.0) return vec3(0.22, 0.42, 0.2);
+  if (pick < 2.0) return vec3(0.36, 0.22, 0.14);
+  if (pick < 3.0) return vec3(0.16, 0.34, 0.42);
+  if (pick < 4.0) return vec3(0.62, 0.52, 0.36);
+  if (pick < 5.0) return vec3(0.3, 0.3, 0.32);
+  return vec3(0.46, 0.2, 0.16);
+}
+`;
+
+const FLIGHT_GLSL = `
 uniform vec3 uTarget;
 uniform float uTime;
 uniform vec2 uViewport;
-uniform float uWidth;
-uniform float uTail;
 
-varying float vK;
-varying float vSide;
-varying float vHead;
-varying float vSeed;
-
-vec3 arcPoint(vec3 a, vec3 b, float angle, float s, float lift) {
+vec3 arcPoint(vec3 a, vec3 b, float angle, float s, float lift, float fan) {
   vec3 dir = angle < 1e-4 ? a : (sin((1.0 - s) * angle) * a + sin(s * angle) * b) / sin(angle);
   float rise = sin(3.14159265 * s);
-  return dir * (1.0008 + lift * rise);
+  vec3 side = cross(a, b);
+  float sideLength = length(side);
+  side = sideLength > 1e-5 ? side / sideLength : vec3(0.0);
+  dir = normalize(dir + side * fan * rise * min(1.0, angle / 1.1));
+  return dir * (1.0008 + lift * rise * (1.0 - 0.25 * s));
+}
+
+float fanOf(float seed) {
+  float u = fract(seed * 5.37) * 2.0 - 1.0;
+  return u * abs(u) * 0.24;
+}
+
+float flightHead(float progress) {
+  float p = clamp(progress, 0.0, 1.0);
+  return p * p * (3.0 - 2.0 * p);
 }
 
 vec2 toScreen(vec4 clip) {
   return clip.xy / max(clip.w, 1e-6) * uViewport;
 }
+`;
+
+export const ARC_VERTEX = `
+attribute float aS;
+attribute float aSide;
+attribute vec4 aOrigin;
+attribute vec4 aTiming;
+uniform float uWidth;
+uniform float uTail;
+
+varying float vK;
+varying float vSide;
+varying float vSeed;
+varying float vLife;
+
+${FLIGHT_GLSL}
 
 void main() {
-  float progress = (uTime - aB.x) / aB.y;
-  float p = clamp(progress, 0.0, 1.0);
-  float eased = p * p * (3.0 - 2.0 * p);
-  float head = eased * (1.0 + uTail);
+  float progress = (uTime - aTiming.x) / aTiming.y;
+  float head = flightHead(progress) * (1.0 + uTail);
   float from = clamp(head - uTail, 0.0, 1.0);
   float to = clamp(head, 0.0, 1.0);
   float visible = step(0.0, progress) * step(from + 1e-4, to);
   float s = mix(from, to, aS);
   vK = clamp((s - (head - uTail)) / uTail, 0.0, 1.0);
-  vHead = head;
   vSide = aSide;
-  vSeed = aB.w;
-  float angle = acos(clamp(dot(aA.xyz, uTarget), -1.0, 1.0));
+  vSeed = aTiming.w;
+  vLife = smoothstep(0.0, 0.06, progress);
+  float angle = acos(clamp(dot(aOrigin.xyz, uTarget), -1.0, 1.0));
   float ds = max(0.002, (to - from) * 0.02);
-  vec3 p0 = arcPoint(aA.xyz, uTarget, angle, s, aB.z);
-  vec3 pa = arcPoint(aA.xyz, uTarget, angle, max(s - ds, 0.0), aB.z);
-  vec3 pb = arcPoint(aA.xyz, uTarget, angle, min(s + ds, 1.0), aB.z);
   mat4 viewProjection = projectionMatrix * viewMatrix;
-  vec4 c0 = viewProjection * vec4(p0, 1.0);
-  vec2 tangent = toScreen(viewProjection * vec4(pb, 1.0)) - toScreen(viewProjection * vec4(pa, 1.0));
+  float fan = fanOf(aTiming.w);
+  vec4 c0 = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, s, aTiming.z, fan), 1.0);
+  vec4 ca = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, max(s - ds, 0.0), aTiming.z, fan), 1.0);
+  vec4 cb = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, min(s + ds, 1.0), aTiming.z, fan), 1.0);
+  vec2 tangent = toScreen(cb) - toScreen(ca);
   float len = length(tangent);
   vec2 dir = len > 1e-6 ? tangent / len : vec2(1.0, 0.0);
   vec2 normal = vec2(-dir.y, dir.x);
-  float width = uWidth * (0.7 + 0.8 * vK * vK);
+  float width = uWidth * (0.55 + 0.9 * vK * vK);
   c0.xy += normal * aSide * 0.5 * width * c0.w / uViewport;
   gl_Position = visible > 0.5 && c0.w > 0.0 ? c0 : vec4(0.0, 0.0, 2.0, 1.0);
 }
@@ -319,26 +366,116 @@ uniform float uFade;
 
 varying float vK;
 varying float vSide;
-varying float vHead;
 varying float vSeed;
+varying float vLife;
 
 void main() {
   float k = clamp(vK, 0.0, 1.0);
   float side = clamp(vSide, -1.0, 1.0);
-  float across = exp(-side * side * 4.0);
-  float trail = k * k * sqrt(k);
-  float headGlow = smoothstep(0.86, 1.0, k) * step(vHead, 1.0) * 1.8;
-  vec3 tailColor = mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.62, 0.3), clamp(vSeed, 0.0, 1.0));
-  vec3 headColor = vec3(1.0, 0.9, 0.74);
-  vec3 color = mix(tailColor, headColor, k * k) * (trail + headGlow) * across;
-  gl_FragColor = vec4(color * uGain * uFade, 1.0);
+  float across = exp(-side * side * 3.0);
+  float trail = k * sqrt(k) * (0.4 + 0.6 * k);
+  vec3 tailColor = mix(vec3(1.0, 0.46, 0.16), vec3(1.0, 0.6, 0.28), vSeed);
+  vec3 headColor = vec3(1.0, 0.86, 0.66);
+  vec3 color = mix(tailColor, headColor, k * k * k) * trail * across;
+  gl_FragColor = vec4(color * uGain * uFade * vLife, 1.0);
+}
+`;
+
+export const CARD_VERTEX = `
+attribute vec2 aCorner;
+attribute vec4 aOrigin;
+attribute vec4 aTiming;
+uniform float uCardSize;
+uniform float uCardShare;
+uniform float uFade;
+
+varying vec2 vLocal;
+varying float vAlpha;
+varying vec3 vSky;
+varying vec3 vGround;
+varying float vHorizon;
+varying float vPixel;
+varying float vCard;
+
+${FLIGHT_GLSL}
+
+const float HALO = 2.6;
+
+${CARD_PALETTE_GLSL}
+void main() {
+  float progress = (uTime - aTiming.x) / aTiming.y;
+  float alive = step(0.0, progress) * step(progress, 1.0);
+  float s = min(flightHead(progress), 1.0);
+  float angle = acos(clamp(dot(aOrigin.xyz, uTarget), -1.0, 1.0));
+  mat4 viewProjection = projectionMatrix * viewMatrix;
+  float fan = fanOf(aTiming.w);
+  vec4 clip = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, s, aTiming.z, fan), 1.0);
+  vec4 ca = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, max(s - 0.01, 0.0), aTiming.z, fan), 1.0);
+  vec4 cb = viewProjection * vec4(arcPoint(aOrigin.xyz, uTarget, angle, min(s + 0.01, 1.0), aTiming.z, fan), 1.0);
+  vec2 tangent = toScreen(cb) - toScreen(ca);
+  float heading = length(tangent) > 1e-5 ? atan(tangent.y, tangent.x) : 0.0;
+  float seed = aTiming.w;
+  float wobble = sin(uTime * (3.0 + 4.0 * seed) + seed * 40.0) * 0.32;
+  float turn = heading + (seed - 0.5) * 0.9 + wobble;
+  vCard = step(fract(seed * 11.7), uCardShare);
+  float size = uCardSize * mix(0.55, 0.8 + 0.5 * fract(seed * 7.31), vCard) * (1.0 - 0.6 * smoothstep(0.75, 1.0, progress));
+  vec2 local = aCorner * HALO;
+  vec2 offset = vec2(cos(turn) * local.x - sin(turn) * local.y, sin(turn) * local.x + cos(turn) * local.y) * size;
+  clip.xy += offset * clip.w / uViewport;
+  vLocal = local;
+  vPixel = 1.0 / max(size, 0.5);
+  vAlpha = smoothstep(0.0, 0.07, progress) * (1.0 - smoothstep(0.93, 1.0, progress)) * uFade;
+  vSky = palette(seed, 0.0);
+  vGround = palette(seed, 1.0);
+  vHorizon = (fract(seed * 3.71) - 0.5) * 0.5;
+  gl_Position = alive > 0.5 && clip.w > 0.0 && vAlpha > 0.002 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
+}
+`;
+
+export const CARD_FRAGMENT = `
+uniform float uBrightness;
+
+varying vec2 vLocal;
+varying float vAlpha;
+varying vec3 vSky;
+varying vec3 vGround;
+varying float vHorizon;
+varying float vPixel;
+varying float vCard;
+
+float roundBox(vec2 p, vec2 extent, float radius) {
+  vec2 q = abs(p) - extent + radius;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+void main() {
+  vec2 p = vLocal;
+  float aa = vPixel * 0.9;
+  vec3 warm = vec3(1.0, 0.62, 0.3);
+  if (vCard < 0.5) {
+    float r = length(p);
+    float core = exp(-r * r * 2.6) * 1.6;
+    float halo = exp(-r * r * 0.5) * 0.14;
+    gl_FragColor = vec4((vec3(1.0, 0.88, 0.7) * core + warm * halo) * vAlpha * uBrightness * 0.7, 1.0);
+    return;
+  }
+  float edge = roundBox(p, vec2(1.0, 0.74), 0.08);
+  float card = 1.0 - smoothstep(-aa, aa, edge);
+  float window = 1.0 - smoothstep(-aa, aa, roundBox(p, vec2(0.72, 0.48), 0.02));
+  vec3 picture = mix(vGround, vSky, smoothstep(-aa, aa, p.y - vHorizon));
+  vec3 paper = vec3(1.0, 0.96, 0.88);
+  vec3 face = mix(paper, picture * 0.9, window) * uBrightness;
+  float outside = max(edge, 0.0);
+  float glow = exp(-outside * outside * 3.5) * 0.22 + exp(-outside * 2.6) * 0.06;
+  vec3 halo = warm * glow * (1.0 - card);
+  gl_FragColor = vec4((face * card + halo) * vAlpha, 1.0);
 }
 `;
 
 export const ORIGIN_VERTEX = `
 attribute vec2 aCorner;
-attribute vec4 aA;
-attribute vec4 aB;
+attribute vec4 aOrigin;
+attribute vec4 aTiming;
 uniform float uTime;
 uniform vec2 uViewport;
 uniform float uSize;
@@ -346,33 +483,44 @@ uniform float uFade;
 
 varying vec2 vCorner;
 varying float vIntensity;
+varying float vRing;
+varying float vRingAlpha;
+
+const float SPAN = 3.6;
 
 void main() {
-  float since = uTime - aA.w;
-  float on = smoothstep(0.0, 0.14, since);
-  float flare = on * exp(-max(since, 0.0) * 5.0) * 2.2;
-  float launch = smoothstep(aB.x - 0.04, aB.x + 0.06, uTime) * exp(-max(uTime - aB.x, 0.0) * 4.0) * 1.2;
-  float ember = on * (0.5 - 0.3 * smoothstep(aB.x, aB.x + aB.y, uTime));
-  vIntensity = (ember + flare + launch) * uFade;
-  vCorner = aCorner;
-  vec3 p = aA.xyz * 1.0012;
-  p += normalize(cameraPosition - p) * 0.006;
+  float since = uTime - aOrigin.w;
+  float on = smoothstep(0.0, 0.1, since);
+  float flare = on * exp(-max(since, 0.0) * 5.0) * 1.3;
+  float launched = uTime - aTiming.x;
+  float ping = step(0.0, launched) * exp(-max(launched, 0.0) * 6.0) * 1.2;
+  float ember = on * (0.36 - 0.24 * smoothstep(0.0, aTiming.y, launched));
+  vIntensity = (ember + flare + ping) * uFade;
+  vRing = clamp(launched / 0.75, 0.0, 1.0);
+  vRingAlpha = step(0.0, launched) * (1.0 - vRing) * (1.0 - vRing) * uFade;
+  vCorner = aCorner * SPAN;
+  vec3 p = aOrigin.xyz * 1.0012;
+  p += normalize(cameraPosition - p) * 0.004;
   vec4 clip = projectionMatrix * viewMatrix * vec4(p, 1.0);
-  float size = uSize * (1.0 + flare * 0.5);
-  clip.xy += aCorner * size * clip.w / uViewport;
-  gl_Position = vIntensity > 0.002 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
+  clip.xy += aCorner * SPAN * uSize * clip.w / uViewport;
+  gl_Position = vIntensity + vRingAlpha > 0.002 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
 }
 `;
 
 export const ORIGIN_FRAGMENT = `
 varying vec2 vCorner;
 varying float vIntensity;
+varying float vRing;
+varying float vRingAlpha;
 
 void main() {
-  float d2 = dot(vCorner, vCorner);
-  float core = exp(-d2 * 10.0);
-  float halo = exp(-d2 * 3.0) * 0.22;
-  gl_FragColor = vec4(vec3(1.0, 0.72, 0.42) * (core + halo) * vIntensity, 1.0);
+  float r = length(vCorner);
+  float core = exp(-r * r * 3.2);
+  float halo = exp(-r * r * 0.6) * 0.05;
+  float ringRadius = 0.6 + vRing * 2.8;
+  float ring = exp(-pow((r - ringRadius) / 0.22, 2.0)) * vRingAlpha * 0.35;
+  vec3 color = vec3(1.0, 0.74, 0.44) * (core + halo) * vIntensity + vec3(1.0, 0.82, 0.6) * ring;
+  gl_FragColor = vec4(color, 1.0);
 }
 `;
 

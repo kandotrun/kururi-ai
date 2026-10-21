@@ -1,9 +1,9 @@
 import { h, phrased } from "./dom";
-import { carriesFiles, pickImageFiles } from "./files";
+import { type DroppedItems, droppedItems } from "./folder-entries";
+import { carriesFiles } from "./files";
 
 export interface DropZoneOptions {
-  onFiles(files: File[]): void;
-  onRejected(): void;
+  onDrop(items: DroppedItems): void;
 }
 
 export interface DropZone {
@@ -22,9 +22,16 @@ export function createDropZone(
         { class: "drop-title" },
         phrased(["ここで離すと、", "ほかの写真より", "先に判定します"]),
       ),
-      h("p", { class: "drop-note" }, [
-        "写真はこのブラウザの中で判定します。どこにも送信しません。",
-      ]),
+      h(
+        "p",
+        { class: "drop-note" },
+        phrased([
+          "フォルダごと離すと、",
+          "中の写真をすべて並べます。",
+          "写真はこのブラウザの中で判定し、",
+          "どこにも送信しません。",
+        ]),
+      ),
     ]),
   ]);
   let depth = 0;
@@ -73,12 +80,7 @@ export function createDropZone(
     event.preventDefault();
     depth = 0;
     setVisible(false);
-    const files = pickImageFiles(event.dataTransfer?.files ?? null);
-    if (files.length > 0) {
-      options.onFiles(files);
-    } else {
-      options.onRejected();
-    }
+    options.onDrop(droppedItems(event.dataTransfer));
   }
 
   function onEnd(): void {

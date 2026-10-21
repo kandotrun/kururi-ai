@@ -60,7 +60,7 @@ export interface IntroOptions {
   target: GeoPoint;
   textureBaseUrl: string;
   lowPower: boolean;
-  deskView?: IntroDeskView;
+  deskView?: IntroDeskView | ((aspect: number) => IntroDeskView);
 }
 
 export interface Intro {
@@ -379,7 +379,12 @@ class IntroRuntime implements IntroController {
   }
 
   private buildPath(aspect: number): CameraPath {
-    const view = this.options.deskView ?? defaultDeskView(aspect);
+    const option = this.options.deskView;
+    const view =
+      typeof option === "function"
+        ? option(aspect)
+        : (option ?? defaultDeskView(aspect));
+    this.room.setDeskView(view);
     return createCameraPath(aspect, this.options.target, view);
   }
 
@@ -446,8 +451,8 @@ class IntroRuntime implements IntroController {
   private warmUp(): void {
     const target = this.post.targetB;
     this.renderStage("globe", 2.6, target);
-    this.renderStage("city", 6.4, target);
-    this.renderStage("room", 8.2, target);
+    this.renderStage("city", 6.8, target);
+    this.renderStage("room", 8.4, target);
     this.renderer.setRenderTarget(null);
   }
 

@@ -2,10 +2,10 @@ import { chromium } from "@playwright/test";
 
 const base = process.env.SCENE_URL ?? "http://127.0.0.1:5173/dev/scene.html";
 const launchArgs =
-  process.env.SCENE_GPU === "1"
-    ? ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist"]
-    : ["--enable-unsafe-swiftshader"];
-const browser = await chromium.launch({ args: launchArgs });
+  process.env.SCENE_GPU === "0"
+    ? ["--enable-unsafe-swiftshader"]
+    : ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-angle=metal"];
+const browser = await chromium.launch({ headless: true, args: launchArgs });
 
 async function run(label, action) {
   const page = await browser.newPage({

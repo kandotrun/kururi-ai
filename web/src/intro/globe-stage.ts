@@ -3,8 +3,9 @@ import {
   BackSide,
   BufferAttribute,
   BufferGeometry,
-  InstancedInterleavedBuffer,
-  InterleavedBufferAttribute,
+  DoubleSide,
+  InstancedBufferAttribute,
+  type InstancedBufferGeometry,
   Matrix4,
   Mesh,
   NormalBlending,
@@ -30,6 +31,8 @@ import {
   ATMOSPHERE_VERTEX,
   BEACON_FRAGMENT,
   BEACON_VERTEX,
+  CARD_FRAGMENT,
+  CARD_VERTEX,
   CLOUD_FRAGMENT,
   EARTH_FRAGMENT,
   ORIGIN_FRAGMENT,
@@ -41,6 +44,7 @@ import {
   STAR_VERTEX,
 } from "./globe-shaders";
 import { ARC_STRIDE, type ArcPlan, arrivedFraction } from "./origins";
+import { GATHER } from "./timeline";
 import {
   applyPose,
   fullscreenTriangle,
@@ -65,6 +69,45 @@ export interface GlobeStageOptions {
 
 const DEG = Math.PI / 180;
 const JAPAN_BOUNDS = new Vector4(128, 152, 26, 46);
+const SUN_ELEVATION = -5 * DEG;
+const SUN_DECLINATION = -11 * DEG;
+
+export interface FlightAttributes {
+  origin: Float32Array;
+  timing: Float32Array;
+}
+
+export function splitFlights(plan: ArcPlan): FlightAttributes {
+  const count = Math.max(1, plan.count);
+  const origin = new Float32Array(count * 4);
+  const timing = new Float32Array(count * 4);
+  for (let index = 0; index < plan.count; index += 1) {
+    const base = index * ARC_STRIDE;
+    for (let lane = 0; lane < 4; lane += 1) {
+      origin[index * 4 + lane] = plan.data[base + lane]!;
+      timing[index * 4 + lane] = plan.data[base + 4 + lane]!;
+    }
+  }
+  return { origin, timing };
+}
+
+export function arcGain(count: number): number {
+  return 1.4 * Math.min(1, Math.max(0.3, 500 / Math.max(1, count)));
+}
+
+export function screenScale(width: number, height: number): number {
+  return Math.min(1.25, Math.max(0.62, Math.sqrt((width * height) / (1440 * 900))));
+}
+
+function attachFlights(
+  geometry: InstancedBufferGeometry,
+  flights: FlightAttributes,
+  count: number,
+): void {
+  geometry.setAttribute("aOrigin", new InstancedBufferAttribute(flights.origin, 4));
+  geometry.setAttribute("aTiming", new InstancedBufferAttribute(flights.timing, 4));
+  geometry.instanceCount = count;
+}
 
 function starGeometry(count: number, random: Random): BufferGeometry {
   const positions = new Float32Array(count * 3);
@@ -107,18 +150,20 @@ export class GlobeStage {
   private readonly space: ShaderMaterial;
   private readonly stars: ShaderMaterial;
   private readonly arcs: ShaderMaterial;
+  private readonly cards: ShaderMaterial;
   private readonly origins: ShaderMaterial;
   private readonly beacon: ShaderMaterial;
   private readonly arcMesh: Mesh;
+  private readonly cardMesh: Mesh;
   private readonly originMesh: Mesh;
 
   constructor(options: GlobeStageOptions) {
     this.plan = options.plan;
     const sun = subsolarForElevation(
       options.target,
-      -7.5 * DEG,
-      -23.2 * DEG,
-      "evening",
+      SUN_ELEVATION,
+      SUN_DECLINATION,
+      "morning",
     );
     const sunVector = latLonToVec3(sun);
     this.sunDir = new Vector3(sunVector[0], sunVector[1], sunVector[2]);
@@ -170,6 +215,7 @@ export class GlobeStage {
         uLights: { value: 1.4 },
         uSun: { value: 1.9 },
         uJapanBounds: { value: JAPAN_BOUNDS },
+        uDetail: { value: 0 },
       },
       vertexShader: SPHERE_VERTEX,
       fragmentShader: EARTH_FRAGMENT,
@@ -208,7 +254,7 @@ export class GlobeStage {
         uSunDir: { value: this.sunDir },
         uSun: { value: 1.9 },
         uIntensity: { value: 5.5 },
-        uAirglow: { value: 0.45 },
+        uAirglow: { value: 0.16 },
         uRadius: { value: 1.028 },
         uScale: { value: 0.0072 },
       },
@@ -226,15 +272,9 @@ export class GlobeStage {
     );
     atmosphereMesh.renderOrder = 4;
 
-    const interleaved = new InstancedInterleavedBuffer(
-      this.plan.data.length > 0 ? this.plan.data : new Float32Array(ARC_STRIDE),
-      ARC_STRIDE,
-      1,
-    );
+    const flights = splitFlights(this.plan);
     const originGeometry = this.track(quadGeometry());
-    originGeometry.setAttribute("aA", new InterleavedBufferAttribute(interleaved, 4, 0));
-    originGeometry.setAttribute("aB", new InterleavedBufferAttribute(interleaved, 4, 4));
-    originGeometry.instanceCount = this.plan.count;
+    attachFlights(originGeometry, flights, this.plan.count);
     this.origins = this.material({
       uniforms: {
         uTime: { value: 0 },
@@ -252,22 +292,21 @@ export class GlobeStage {
     this.originMesh.frustumCulled = false;
     this.originMesh.renderOrder = 5;
 
-    const arcGeometry = this.track(ribbonGeometry(options.lowPower ? 36 : 60));
-    arcGeometry.setAttribute("aA", new InterleavedBufferAttribute(interleaved, 4, 0));
-    arcGeometry.setAttribute("aB", new InterleavedBufferAttribute(interleaved, 4, 4));
-    arcGeometry.instanceCount = this.plan.count;
+    const arcGeometry = this.track(ribbonGeometry(options.lowPower ? 36 : 56));
+    attachFlights(arcGeometry, flights, this.plan.count);
     this.arcs = this.material({
       uniforms: {
         uTarget: { value: target },
         uTime: { value: 0 },
         uViewport: { value: this.viewport },
         uWidth: { value: 2 },
-        uTail: { value: 0.42 },
-        uGain: { value: Math.min(1, Math.max(0.32, 1100 / Math.max(1, this.plan.count))) * 2.2 },
+        uTail: { value: 0.38 },
+        uGain: { value: arcGain(this.plan.count) },
         uFade: { value: 1 },
       },
       vertexShader: ARC_VERTEX,
       fragmentShader: ARC_FRAGMENT,
+      side: DoubleSide,
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
@@ -275,6 +314,28 @@ export class GlobeStage {
     this.arcMesh = new Mesh(arcGeometry, this.arcs);
     this.arcMesh.frustumCulled = false;
     this.arcMesh.renderOrder = 6;
+
+    const cardGeometry = this.track(quadGeometry());
+    attachFlights(cardGeometry, flights, this.plan.count);
+    this.cards = this.material({
+      uniforms: {
+        uTarget: { value: target },
+        uTime: { value: 0 },
+        uViewport: { value: this.viewport },
+        uCardSize: { value: 3 },
+        uCardShare: { value: 0.3 },
+        uFade: { value: 1 },
+        uBrightness: { value: 1.5 },
+      },
+      vertexShader: CARD_VERTEX,
+      fragmentShader: CARD_FRAGMENT,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.cardMesh = new Mesh(cardGeometry, this.cards);
+    this.cardMesh.frustumCulled = false;
+    this.cardMesh.renderOrder = 7;
 
     this.beacon = this.material({
       uniforms: {
@@ -293,7 +354,7 @@ export class GlobeStage {
     beaconGeometry.instanceCount = 1;
     const beaconMesh = new Mesh(beaconGeometry, this.beacon);
     beaconMesh.frustumCulled = false;
-    beaconMesh.renderOrder = 7;
+    beaconMesh.renderOrder = 8;
 
     this.scene.add(
       spaceMesh,
@@ -303,6 +364,7 @@ export class GlobeStage {
       atmosphereMesh,
       this.originMesh,
       this.arcMesh,
+      this.cardMesh,
       beaconMesh,
     );
   }
@@ -341,29 +403,39 @@ export class GlobeStage {
     const shift = 0.0035 + time * 0.0014;
     this.earth.uniforms.uCloudShift!.value = shift;
     this.clouds.uniforms.uCloudShift!.value = shift;
-    this.earth.uniforms.uJapanMix!.value = smoothstep(3.4, 4.7, time);
-    const lights = 1.35 + 1.1 * smoothstep(3.8, 5.3, time);
+    this.earth.uniforms.uJapanMix!.value = smoothstep(4.1, 5.2, time);
+    const lights = 1.35 + 0.6 * smoothstep(4.4, 5.6, time);
     this.earth.uniforms.uLights!.value = lights;
+    this.earth.uniforms.uDetail!.value = 1 - smoothstep(0.03, 0.3, altitude);
     this.clouds.uniforms.uLights!.value = lights;
-    this.clouds.uniforms.uOpacity!.value = 1 - 0.35 * smoothstep(4.6, 5.3, time);
+    this.clouds.uniforms.uOpacity!.value = 1 - 0.35 * smoothstep(5.1, 5.8, time);
 
+    const scale = screenScale(width, height);
+    const flying = this.plan.count > 0 && time > GATHER.launchStart - 0.05 && time < GATHER.arrivalEnd + 0.7;
+    const flightFade = 1 - smoothstep(GATHER.arrivalEnd, GATHER.arrivalEnd + 0.6, time);
     this.arcs.uniforms.uTime!.value = time;
-    this.arcs.uniforms.uWidth!.value = 2.1 * pixelRatio;
-    this.arcs.uniforms.uFade!.value = 1 - smoothstep(4.0, 4.6, time);
-    this.arcMesh.visible = time > 1.0 && time < 4.6 && this.plan.count > 0;
+    this.arcs.uniforms.uWidth!.value = 1.8 * scale * pixelRatio;
+    this.arcs.uniforms.uFade!.value = flightFade;
+    this.arcMesh.visible = flying;
+    this.cards.uniforms.uTime!.value = time;
+    this.cards.uniforms.uCardSize!.value = 3.0 * scale * pixelRatio;
+    this.cards.uniforms.uFade!.value = flightFade;
+    this.cardMesh.visible = flying;
     this.origins.uniforms.uTime!.value = time;
-    this.origins.uniforms.uSize!.value = 3.1 * pixelRatio;
-    this.origins.uniforms.uFade!.value = 1 - smoothstep(3.5, 4.4, time);
-    this.originMesh.visible = time > 0.95 && time < 4.4 && this.plan.count > 0;
+    this.origins.uniforms.uSize!.value = 2.2 * scale * pixelRatio;
+    this.origins.uniforms.uFade!.value = 1 - smoothstep(GATHER.arrivalEnd - 0.3, GATHER.arrivalEnd + 0.5, time);
+    this.originMesh.visible =
+      this.plan.count > 0 && time > GATHER.lightStart - 0.05 && time < GATHER.arrivalEnd + 0.5;
 
     const arrived = arrivedFraction(this.plan, time);
-    const fallback = this.plan.count === 0 ? smoothstep(2.0, 3.2, time) : 0;
+    const rate = (arrived - arrivedFraction(this.plan, time - 0.25)) * 4;
+    const fallback = this.plan.count === 0 ? smoothstep(2.2, 3.6, time) : 0;
     const gathered = Math.max(arrived, fallback);
-    const breathing = 1 + 0.06 * Math.sin(time * 9.0) * gathered;
-    const dive = envelope(time, 3.3, 3.9, 4.6, 5.5);
+    const pulse = 1 + 0.08 * Math.sin(time * 9.0) * gathered + 0.6 * Math.min(1, rate * 0.9);
+    const dive = envelope(time, 3.9, 4.5, 5.2, 6.0);
     this.beacon.uniforms.uIntensity!.value =
-      (0.12 * smoothstep(1.4, 2.2, time) + 1.5 * gathered) * breathing * (1 - 0.55 * dive) * (1 - smoothstep(4.9, 5.5, time));
-    this.beacon.uniforms.uSize!.value = (16 + 26 * gathered) * pixelRatio;
+      (0.1 * smoothstep(1.3, 2.2, time) + 1.6 * gathered) * pulse * (1 - 0.55 * dive) * (1 - smoothstep(5.4, 6.0, time));
+    this.beacon.uniforms.uSize!.value = (14 + 26 * gathered) * scale * pixelRatio;
   }
 
   dispose(): void {

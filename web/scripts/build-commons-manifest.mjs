@@ -408,6 +408,7 @@ const options = parseArgs({
     minimum: { type: "string", default: "2000" },
     out: { type: "string", default: resolve(ROOT, "public/commons") },
     cache: { type: "string" },
+    exclude: { type: "string", default: resolve(ROOT, "scripts/commons-exclude.json") },
     check: { type: "string" },
     explore: { type: "boolean", default: false },
   },
@@ -1255,6 +1256,14 @@ async function check(count) {
   }
 }
 
+async function loadExclusions(path) {
+  const parsed = JSON.parse(await readFile(path, "utf8"));
+  if (!parsed || !Array.isArray(parsed.files)) {
+    throw new Error(`exclusion list ${path} must have a files array`);
+  }
+  return new Set(parsed.files.map((item) => item.file));
+}
+
 async function build() {
   const target = Number(options.target);
   const minimum = Number(options.minimum);
@@ -1270,7 +1279,9 @@ async function build() {
     return;
   }
   const { state, cap, stats } = await collect(candidates, target);
-  const selected = select(state, cap, target);
+  const excluded = await loadExclusions(options.exclude);
+  const selected = select(state, cap, target).filter(({ entry }) => !excluded.has(entry.file));
+  log(`excluded after review ${excluded.size}`);
   if (selected.length < minimum) {
     throw new Error(`only ${selected.length} files passed the filters (minimum ${minimum})`);
   }

@@ -9,6 +9,7 @@ uniform vec2 uFogRange;
 uniform vec3 uMatDeep;
 uniform vec3 uLampTint;
 uniform vec2 uViewport;
+uniform vec2 uViewShift;
 `;
 
 export const SHARED_FUNCTIONS_GLSL = `
@@ -51,7 +52,7 @@ vec3 lampLight(vec2 xz) {
 }
 
 float vignette(vec2 fragCoord) {
-  vec2 centred = fragCoord / max(uViewport, vec2(1.0)) - vec2(0.5, 0.46);
+  vec2 centred = fragCoord / max(uViewport, vec2(1.0)) - vec2(0.5 + uViewShift.x, 0.46 - uViewShift.y);
   centred.x *= uViewport.x / max(uViewport.y, 1.0);
   float reach = length(centred) / (0.5 * length(vec2(uViewport.x / max(uViewport.y, 1.0), 1.0)));
   return 1.0 - 0.34 * smoothstep(0.35, 1.05, reach);

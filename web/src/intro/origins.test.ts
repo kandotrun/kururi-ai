@@ -77,6 +77,28 @@ describe("planArcs", () => {
     }
   });
 
+  it("keeps many streaks in flight at once so the gathering reads clearly", () => {
+    const plan = planArcs(randomOrigins(3000, 5), TOKYO, {
+      cap: 3000,
+      random: mulberry32(4),
+    });
+    let flying = 0;
+    for (let index = 0; index < plan.count; index += 1) {
+      const base = index * ARC_STRIDE;
+      const light = plan.data[base + 3]!;
+      const launch = plan.data[base + 4]!;
+      const travel = plan.data[base + 5]!;
+      expect(travel).toBeGreaterThanOrEqual(0.85);
+      expect(launch - light).toBeGreaterThanOrEqual(0.12 - 1e-6);
+      if (launch <= 2.7 && launch + travel > 2.7) {
+        flying += 1;
+      }
+    }
+    expect(flying / plan.count).toBeGreaterThan(0.4);
+    expect(arrivedFraction(plan, 2.6)).toBeLessThan(0.25);
+    expect(arrivedFraction(plan, 3.6)).toBeGreaterThan(0.6);
+  });
+
   it("moves antipodal origins off the degenerate great circle", () => {
     const antipode = { lat: -TOKYO.lat, lon: TOKYO.lon - 180 };
     const plan = planArcs([antipode], TOKYO, {

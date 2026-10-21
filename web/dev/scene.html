@@ -55,10 +55,33 @@
       #loupe[hidden] {
         display: none;
       }
+
+      #ui-mock {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .ui-block {
+        position: absolute;
+        background: rgb(23 58 48 / 0.38);
+        box-shadow: inset 0 0 0 1px rgb(233 240 236 / 0.18);
+      }
+
+      .ui-free {
+        position: absolute;
+        box-sizing: border-box;
+        border: 1px dashed rgb(247 245 239 / 0.55);
+      }
+
+      body.clean #ui-mock {
+        display: none;
+      }
     </style>
   </head>
   <body>
     <canvas id="desk"></canvas>
+    <div id="ui-mock"></div>
     <div id="loupe" hidden></div>
     <div id="hud" hidden></div>
     <script type="module" src="./scene-harness.ts"></script>

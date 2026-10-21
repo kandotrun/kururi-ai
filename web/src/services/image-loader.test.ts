@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PhotoSource } from "../contracts";
-import { createImageLoader, RateLimitedError } from "./image-loader";
+import type { ExifOrientation } from "../core/tiff-preview";
+import {
+  buildJpeg,
+  buildTiff,
+  nefLikeRaw,
+  proRawLikeDng,
+  TIFF_TYPE,
+} from "../core/tiff-preview.fixtures";
+import {
+  createImageLoader,
+  RateLimitedError,
+  visitorPreviewBlob,
+} from "./image-loader";
 
 interface FakeBitmap extends ImageBitmap {
   readonly closed: boolean;
@@ -383,5 +395,508 @@ describe("createImageLoader", () => {
     });
     await expect(loader.load(source(), controller.signal)).rejects.toThrow();
     expect(decodedBitmap.closed).toBe(true);
+  });
+});
+
+function userFile(
+  bytes: Uint8Array<ArrayBuffer>,
+  name: string,
+  type = "",
+): File {
+  return new File([bytes], name, { type });
+}
+
+function userSourceOf(file: File): PhotoSource {
+  return source({
+    id: "user-1",
+    kind: "user",
+    file,
+    thumbUrl: null,
+    uprightFix: null,
+    title: file.name,
+  });
+}
+
+function rawDecoder(width: number, height: number) {
+  const calls: Array<{ blob: Blob; options: ImageBitmapOptions | undefined }> =
+    [];
+  const decoded: FakeBitmap[] = [];
+  const decode = vi.fn(async (blob: Blob, options?: ImageBitmapOptions) => {
+    calls.push({ blob, options });
+    const result = bitmap(
+      options?.resizeWidth ?? width,
+      options?.resizeHeight ?? height,
+      "decoded",
+    );
+    decoded.push(result);
+    return result;
+  });
+  return { decode, calls, decoded };
+}
+
+function orienter() {
+  const made: Array<{ bitmap: FakeBitmap; blob: Blob }> = [];
+  const orient = vi.fn(
+    async (image: ImageBitmap, orientation: ExifOrientation) => {
+      const turned = orientation >= 5;
+      const result = {
+        bitmap: bitmap(
+          turned ? image.height : image.width,
+          turned ? image.width : image.height,
+          "oriented",
+        ),
+        blob: new Blob([new Uint8Array([0xff, 0xd8, orientation])], {
+          type: "image/jpeg",
+        }),
+      };
+      made.push(result);
+      return result;
+    },
+  );
+  return { orient, made };
+}
+
+function sizedResize() {
+  const resized: FakeBitmap[] = [];
+  const resize = vi.fn(
+    async (_image: ImageBitmap, options: ImageBitmapOptions) => {
+      const result = bitmap(
+        options.resizeWidth ?? 0,
+        options.resizeHeight ?? 0,
+        "resized",
+      );
+      resized.push(result);
+      return result;
+    },
+  );
+  return { resize, resized };
+}
+
+function loggedBytes() {
+  const calls: Array<{ offset: number; length: number }> = [];
+  const readBytes = vi.fn(
+    async (blob: Blob, offset: number, length: number) => {
+      calls.push({ offset, length });
+      return new Uint8Array(
+        await blob.slice(offset, offset + length).arrayBuffer(),
+      );
+    },
+  );
+  return {
+    readBytes,
+    calls,
+    total: () => calls.reduce((sum, call) => sum + call.length, 0),
+  };
+}
+
+async function bytesOf(blob: Blob): Promise<Uint8Array> {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+describe("createImageLoader with visitors' RAW files", () => {
+  const SMALL_DNG = { size: 3_000_000, rawAt: 1_000_000 };
+
+  it("decodes the embedded preview of a ProRAW DNG and turns it upright", async () => {
+    const dng = proRawLikeDng({ orientation: 6, ...SMALL_DNG });
+    const file = userFile(dng.file.bytesAt(0, dng.file.size), "photo-0001.DNG");
+    const { decode, calls, decoded } = rawDecoder(4032, 3024);
+    const { orient, made } = orienter();
+    const { resize, resized } = sizedResize();
+    const bytes = loggedBytes();
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize,
+      orient,
+      readBytes: bytes.readBytes,
+    });
+    const result = await loader.load(userSourceOf(file));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.options).toEqual({
+      imageOrientation: "from-image",
+      resizeWidth: 2048,
+      resizeHeight: 1536,
+      resizeQuality: "high",
+    });
+    const preview = await bytesOf(calls[0]!.blob);
+    expect(preview.length).toBe(dng.previewLength);
+    expect([...preview.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    expect(calls[0]?.blob.type).toBe("image/jpeg");
+    expect(orient).toHaveBeenCalledWith(decoded[0], 6);
+    expect(decoded[0]?.closed).toBe(true);
+    expect(resize).toHaveBeenCalledWith(made[0]?.bitmap, {
+      resizeWidth: 90,
+      resizeHeight: 120,
+      resizeQuality: "high",
+    });
+    expect(made[0]?.bitmap.closed).toBe(true);
+    expect(result.bitmap).toBe(resized[0]);
+    expect(result.blob).toBe(made[0]?.blob);
+    expect(result.aspect).toBe(0.75);
+    expect(bytes.total()).toBeLessThan(256 * 1_024);
+    expect(
+      bytes.calls.every((call) => call.offset + call.length <= dng.rawAt),
+    ).toBe(true);
+  });
+
+  it("uses the full-size JpgFromRaw of a NEF and re-encodes it at 2048 pixels", async () => {
+    const nef = nefLikeRaw({
+      orientation: 1,
+      size: 3_500_000,
+      rawAt: 3_000_000,
+    });
+    const file = userFile(nef.file.bytesAt(0, nef.file.size), "frame-0001.NEF");
+    const { decode, calls, decoded } = rawDecoder(6048, 4032);
+    const { orient, made } = orienter();
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize: sizedResize().resize,
+      orient,
+    });
+    const result = await loader.load(userSourceOf(file));
+    expect(calls[0]?.options).toMatchObject({
+      resizeWidth: 2048,
+      resizeHeight: 1365,
+    });
+    expect((await bytesOf(calls[0]!.blob)).length).toBe(nef.previewLength);
+    expect(orient).toHaveBeenCalledWith(decoded[0], 1);
+    expect(result.blob).toBe(made[0]?.blob);
+    expect(result.aspect).toBeCloseTo(2048 / 1365);
+  });
+
+  it("lets the decoder apply the preview's own EXIF orientation only once", async () => {
+    const jpeg = buildJpeg({ width: 1616, height: 1080, exifOrientation: 6 });
+    const tiff = buildTiff({
+      endian: "II",
+      first: 8,
+      size: 512,
+      ifds: [
+        {
+          at: 8,
+          entries: [
+            { tag: 0x0112, type: TIFF_TYPE.short, values: [6] },
+            { tag: 0x0201, type: TIFF_TYPE.long, values: [512] },
+            { tag: 0x0202, type: TIFF_TYPE.long, values: [jpeg.length] },
+          ],
+        },
+      ],
+    });
+    const bytes = new Uint8Array(512 + jpeg.length);
+    bytes.set(tiff);
+    bytes.set(jpeg, 512);
+    const { decode, calls } = rawDecoder(1080, 1616);
+    const { orient } = orienter();
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize: sizedResize().resize,
+      orient,
+    });
+    const result = await loader.load(
+      userSourceOf(userFile(bytes, "frame-0001.ARW")),
+    );
+    expect(calls[0]?.options).toEqual({ imageOrientation: "from-image" });
+    expect(orient).not.toHaveBeenCalled();
+    expect(await bytesOf(result.blob)).toEqual(jpeg);
+    expect(result.aspect).toBeCloseTo(1080 / 1616);
+  });
+
+  it("fits a large preview with its own orientation after decoding", async () => {
+    const jpeg = buildJpeg({ width: 6000, height: 4000, exifOrientation: 8 });
+    const tiff = buildTiff({
+      endian: "MM",
+      first: 8,
+      size: 512,
+      ifds: [
+        {
+          at: 8,
+          entries: [
+            { tag: 0x0201, type: TIFF_TYPE.long, values: [512] },
+            { tag: 0x0202, type: TIFF_TYPE.long, values: [jpeg.length] },
+          ],
+        },
+      ],
+    });
+    const bytes = new Uint8Array(512 + jpeg.length);
+    bytes.set(tiff);
+    bytes.set(jpeg, 512);
+    const { decode, calls, decoded } = rawDecoder(4000, 6000);
+    const { orient } = orienter();
+    const { resize, resized } = sizedResize();
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize,
+      orient,
+    });
+    const result = await loader.load(
+      userSourceOf(userFile(bytes, "photo-1.CR2")),
+    );
+    expect(calls[0]?.options).toEqual({ imageOrientation: "from-image" });
+    expect(resize).toHaveBeenNthCalledWith(1, decoded[0], {
+      resizeWidth: 1365,
+      resizeHeight: 2048,
+      resizeQuality: "high",
+    });
+    expect(orient).toHaveBeenCalledWith(resized[0], 1);
+    expect(result.aspect).toBeCloseTo(1365 / 2048);
+  });
+
+  it("explains when a RAW file has no preview the browser can show", async () => {
+    const tiff = buildTiff({
+      endian: "II",
+      first: 8,
+      size: 4_096,
+      ifds: [
+        {
+          at: 8,
+          entries: [{ tag: 0x0112, type: TIFF_TYPE.short, values: [6] }],
+        },
+      ],
+    });
+    const { decode } = rawDecoder(10, 10);
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+    });
+    await expect(
+      loader.load(userSourceOf(userFile(tiff, "broken.DNG"))),
+    ).rejects.toThrow(
+      "この RAW ファイルにはブラウザで表示できるプレビュー画像がありません",
+    );
+    await expect(
+      loader.load(
+        userSourceOf(userFile(new TextEncoder().encode("garbage"), "x.NEF")),
+      ),
+    ).rejects.toThrow(/プレビュー画像/);
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("explains when the RAW preview cannot be decoded", async () => {
+    const dng = proRawLikeDng(SMALL_DNG);
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode: async () => {
+        throw new Error("bad jpeg");
+      },
+      orient: orienter().orient,
+    });
+    await expect(
+      loader.load(
+        userSourceOf(userFile(dng.file.bytesAt(0, dng.file.size), "a.DNG")),
+      ),
+    ).rejects.toThrow("RAW ファイルのプレビュー画像を読み取れませんでした");
+  });
+
+  it("reports a file that can no longer be read", async () => {
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode: rawDecoder(10, 10).decode,
+      readBytes: async () => {
+        throw new DOMException("gone", "NotReadableError");
+      },
+    });
+    await expect(
+      loader.load(userSourceOf(userFile(new Uint8Array(64), "a.DNG"))),
+    ).rejects.toThrow("写真のファイルを読み込めませんでした");
+  });
+
+  it("reads RAW files with Blob.slice by default", async () => {
+    const dng = proRawLikeDng({ orientation: 3, ...SMALL_DNG });
+    const file = userFile(dng.file.bytesAt(0, dng.file.size), "photo-0002.dng");
+    const slice = vi.spyOn(file, "slice");
+    const { decode } = rawDecoder(4032, 3024);
+    const { orient } = orienter();
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize: sizedResize().resize,
+      orient,
+    });
+    await loader.load(userSourceOf(file));
+    expect(orient).toHaveBeenCalledWith(expect.anything(), 3);
+    const ranges = slice.mock.calls.map(([start, end]) => ({
+      start: start ?? 0,
+      end: end ?? file.size,
+    }));
+    const previewSlices = ranges.filter(
+      (range) =>
+        range.start === dng.previewAt &&
+        range.end === dng.previewAt + dng.previewLength,
+    );
+    const reads = ranges.filter((range) => !previewSlices.includes(range));
+    expect(previewSlices).toHaveLength(1);
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((range) => range.end - range.start <= 64 * 1_024)).toBe(
+      true,
+    );
+    expect(reads.every((range) => range.end <= dng.rawAt)).toBe(true);
+    expect(
+      reads.reduce((sum, range) => sum + range.end - range.start, 0),
+    ).toBeLessThan(256 * 1_024);
+  });
+
+  it("decodes at most two visitors' photos at a time", async () => {
+    const dng = proRawLikeDng(SMALL_DNG);
+    const bytes = dng.file.bytesAt(0, dng.file.size);
+    const gates: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const decode = vi.fn(
+      (_blob: Blob, options?: ImageBitmapOptions) =>
+        new Promise<ImageBitmap>((resolve) => {
+          active += 1;
+          peak = Math.max(peak, active);
+          gates.push(() => {
+            active -= 1;
+            resolve(
+              bitmap(
+                options?.resizeWidth ?? 100,
+                options?.resizeHeight ?? 80,
+                "d",
+              ),
+            );
+          });
+        }),
+    );
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode,
+      resize: sizedResize().resize,
+      orient: orienter().orient,
+    });
+    const loads = [
+      ...Array.from({ length: 3 }, (_, index) =>
+        loader.load(userSourceOf(userFile(bytes, `r${index}.DNG`))),
+      ),
+      ...Array.from({ length: 2 }, (_, index) =>
+        loader.load(
+          userSourceOf(
+            userFile(new Uint8Array([1]), `p${index}.jpg`, "image/jpeg"),
+          ),
+        ),
+      ),
+    ];
+    for (
+      let round = 0;
+      round < 20 && gates.length + decode.mock.calls.length < 10;
+      round += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(active).toBeLessThanOrEqual(2);
+      gates.shift()?.();
+    }
+    while (gates.length > 0 || decode.mock.calls.length < 5) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      gates.shift()?.();
+    }
+    await Promise.all(loads);
+    expect(decode).toHaveBeenCalledTimes(5);
+    expect(peak).toBe(2);
+  });
+
+  it("names HEIC when the browser cannot decode it", async () => {
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode: async () => {
+        throw new Error("unsupported");
+      },
+    });
+    await expect(
+      loader.load(
+        userSourceOf(
+          userFile(new Uint8Array([1]), "photo-0003.HEIC", "image/heic"),
+        ),
+      ),
+    ).rejects.toThrow("HEIC 形式の写真はこのブラウザでは読み込めません");
+    await expect(
+      loader.load(
+        userSourceOf(userFile(new Uint8Array([1]), "scan.tiff", "image/tiff")),
+      ),
+    ).rejects.toThrow("この形式の画像はこのブラウザでは読み込めません");
+  });
+
+  it("closes what it decoded when the caller aborts during a RAW load", async () => {
+    const dng = proRawLikeDng(SMALL_DNG);
+    const controller = new AbortController();
+    const decoded: FakeBitmap[] = [];
+    const made: FakeBitmap[] = [];
+    const loader = createImageLoader({
+      tileSize: 120,
+      timeoutMs: 1_000,
+      decode: async (_blob, options) => {
+        const result = bitmap(
+          options?.resizeWidth ?? 1,
+          options?.resizeHeight ?? 1,
+          "d",
+        );
+        decoded.push(result);
+        return result;
+      },
+      orient: async (image) => {
+        controller.abort();
+        const result = bitmap(image.width, image.height, "o");
+        made.push(result);
+        return { bitmap: result, blob: new Blob([]) };
+      },
+    });
+    await expect(
+      loader.load(
+        userSourceOf(userFile(dng.file.bytesAt(0, dng.file.size), "a.DNG")),
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(decoded[0]?.closed).toBe(true);
+    expect(made[0]?.closed).toBe(true);
+  });
+});
+
+describe("visitorPreviewBlob", () => {
+  it("returns ordinary photos unchanged", async () => {
+    const file = userFile(new Uint8Array([1, 2]), "a.jpg", "image/jpeg");
+    const decode = vi.fn();
+    expect(await visitorPreviewBlob(file, 960, { decode })).toBe(file);
+    expect(decode).not.toHaveBeenCalled();
+  });
+
+  it("renders an upright JPEG of a RAW file at the requested size", async () => {
+    const dng = proRawLikeDng({
+      orientation: 8,
+      size: 3_000_000,
+      rawAt: 1_000_000,
+    });
+    const file = userFile(dng.file.bytesAt(0, dng.file.size), "photo-0009.DNG");
+    const { decode, calls } = rawDecoder(4032, 3024);
+    const { orient, made } = orienter();
+    const blob = await visitorPreviewBlob(file, 960, {
+      decode,
+      orient,
+      resize: sizedResize().resize,
+    });
+    expect(calls[0]?.options).toMatchObject({
+      resizeWidth: 960,
+      resizeHeight: 720,
+    });
+    expect(orient).toHaveBeenCalledWith(expect.anything(), 8);
+    expect(blob).toBe(made[0]?.blob);
+    expect(made[0]?.bitmap.closed).toBe(true);
+  });
+
+  it("passes loading errors on", async () => {
+    const file = userFile(new TextEncoder().encode("nope"), "x.NEF");
+    await expect(visitorPreviewBlob(file, 960, {})).rejects.toThrow(
+      /プレビュー画像/,
+    );
   });
 });

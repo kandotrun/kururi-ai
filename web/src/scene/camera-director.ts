@@ -1,14 +1,24 @@
 import type { PerspectiveCamera } from "three";
+import type { ViewInsets } from "../contracts";
 import {
+  ARRIVAL_DEPTH,
+  ARRIVAL_PITCH,
   ARRIVAL_WIDTH,
+  type AreaSize,
+  type BandBox,
+  type CameraView,
   DESK_YAW,
   type DeskBounds,
-  arrivalView,
-  compositionShift,
-  fitDistance,
-  followMargin,
-  shiftedFit,
-  viewFov,
+  type FrameSubject,
+  type GridCell,
+  type ViewFrame,
+  focusArea,
+  followArea,
+  frameArea,
+  leadAnchor,
+  screenExtent,
+  spiralPoint,
+  viewFrame,
 } from "../core/layout";
 import { type Spring, springSettled, springStep } from "../core/motion";
 
@@ -17,13 +27,13 @@ export type CameraMode = "follow" | "reveal" | "focus" | "user";
 export interface DirectorFrame {
   now: number;
   dt: number;
-  frontX: number;
-  frontZ: number;
-  bandMinX: number;
-  bandMaxX: number;
-  bandMinZ: number;
-  bandMaxZ: number;
-  bandCount: number;
+  front: DeskBounds;
+  band: BandBox;
+  visitors: BandBox;
+  action: BandAnchor;
+  visitorAction: BandAnchor;
+  placeRate: number;
+  falling: number;
   prints: number;
   placed: number;
   lastPlacedAt: number;
@@ -34,6 +44,12 @@ export interface DirectorFrame {
   holdWide: boolean;
   viewWidth: number;
   viewHeight: number;
+  insets: ViewInsets;
+}
+
+export interface BandAnchor extends GridCell {
+  count: number;
+  slot: number;
 }
 
 interface Target {
@@ -57,29 +73,55 @@ const REVEAL_EVERY_PLACED = 300;
 const REVEAL_EVERY_SECONDS = 25;
 const REVEAL_SECONDS = 6;
 const REVEAL_MIN_PLACED = 60;
+const REVEAL_MARGIN = 0.9;
+const REVEAL_PADDING = 1.03;
 const IDLE_WIDE_SECONDS = 7;
 const USER_IDLE_SECONDS = 8;
 const MIN_DISTANCE = 2.2;
 const MIN_PITCH = 34 * DEG;
 const MAX_PITCH = 80 * DEG;
 const MAX_USER_YAW = 40 * DEG;
-const ARRIVAL_RADIUS = 2.8;
 const ARRIVAL_OMEGA = 1.35;
-const FOLLOW_GROWTH = 1.0;
-const BAND_FRONT_PAD = 0.3;
-const OPEN_FRONT_PAD = 1.1;
-const NEAR_MARGIN_SCALE = 1.45;
+const FOLLOW_OMEGA = 1.8;
+const FOCUS_OMEGA = 2.1;
+const VISITOR_OMEGA = 1.6;
+const REVEAL_OMEGA = 1.5;
+const FOLLOW_GROWTH = 0.6;
+const FOLLOW_PX_PER_UNIT = 104;
+const FOLLOW_MIN_WIDTH = 4.6;
+const FOLLOW_MAX_WIDTH = 12;
+const FOLLOW_DEPTH_RATIO = 0.55;
+const LEGIBLE_PX_PER_UNIT = 52;
+const LEGIBLE_DEPTH_SCALE = 0.8;
+const BAND_MARGIN = 0.7;
+const SMALL_BAND_MARGIN = 0.55;
+const HOLD_BAND_MARGIN = 0.5;
+const FOCUS_MARGIN = 0.62;
+const FOCUS_MIN_WIDTH = 3.1;
+const FOCUS_MIN_DEPTH = 2.3;
+const RECUT_SHIFT = 0.01;
+const RECUT_SPILL = 1.02;
+const RECUT_ZOOM = 0.3;
+const REDUCED_HEADROOM = 1.12;
+const MAX_LEAD_SLOTS = 14;
+const LEAD_GAIN = 1.4;
+
+function centre(box: DeskBounds): GridCell {
+  return { x: (box.minX + box.maxX) / 2, z: (box.minZ + box.maxZ) / 2 };
+}
 
 function spring(value: number): Spring {
   return { value, velocity: 0 };
 }
+
+const NO_INSETS: ViewInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 export class CameraDirector {
   readonly camera: PerspectiveCamera;
   mode: CameraMode = "follow";
   private reduced: boolean;
   private readonly x = spring(0);
-  private readonly z = spring(0.4);
+  private readonly z = spring(0);
   private readonly logDistance = spring(Math.log(7));
   private readonly yaw = spring(BASE_YAW);
   private readonly pitch = spring(FOLLOW_PITCH);
@@ -90,11 +132,11 @@ export class CameraDirector {
   private readonly shiftY = spring(0);
   private readonly target: Target = {
     x: 0,
-    z: 0.4,
+    z: 0,
     distance: 7,
     yaw: BASE_YAW,
     pitch: FOLLOW_PITCH,
-    omega: 1.3,
+    omega: FOLLOW_OMEGA,
     radius: 5,
     shiftX: 0,
     shiftY: 0,
@@ -119,6 +161,8 @@ export class CameraDirector {
   private heldX = 0;
   private heldZ = 0;
   private heldDistance = 0;
+  private heldShiftX = 0;
+  private heldShiftY = 0;
   private lastMode: CameraMode = "follow";
   private maxDistance = 400;
   private lastFov = 0;
@@ -126,7 +170,28 @@ export class CameraDirector {
   private lastAspect = 0;
   private lastShiftX = Number.NaN;
   private lastShiftY = Number.NaN;
+  private lastWidth = 0;
+  private lastHeight = 0;
   private initialised = false;
+  private frame: ViewFrame = viewFrame(1, 1, NO_INSETS);
+  private readonly wanted: DeskBounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  private readonly held: CameraView = {
+    targetX: 0,
+    targetZ: 0,
+    distance: 1,
+    pitch: FOLLOW_PITCH,
+    yaw: BASE_YAW,
+  };
+  private readonly followSubject: FrameSubject = {
+    band: { count: 0, minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
+    include: { minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
+    anchor: { x: 0, z: 0 },
+  };
+  private readonly focusSubject: FrameSubject = {
+    band: { count: 0, minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
+    include: { minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
+    anchor: { x: 0, z: 0 },
+  };
 
   constructor(camera: PerspectiveCamera, reducedMotion: boolean) {
     this.camera = camera;
@@ -206,6 +271,7 @@ export class CameraDirector {
   }
 
   update(frame: DirectorFrame): boolean {
+    this.frame = viewFrame(frame.viewWidth, frame.viewHeight, frame.insets);
     const mode = this.chooseMode(frame);
     this.mode = mode;
     this.computeTarget(mode, frame);
@@ -217,6 +283,9 @@ export class CameraDirector {
         (mode !== this.lastMode || this.shouldRecut()));
     this.lastMode = mode;
     if (cut) {
+      if (this.initialised) {
+        target.distance *= REDUCED_HEADROOM;
+      }
       this.snap();
       this.initialised = true;
     }
@@ -265,6 +334,18 @@ export class CameraDirector {
     return this.radius.value;
   }
 
+  get wantedArea(): DeskBounds {
+    return this.wanted;
+  }
+
+  get viewShiftX(): number {
+    return this.shiftX.value;
+  }
+
+  get viewShiftY(): number {
+    return this.shiftY.value;
+  }
+
   private enterUser(now: number): void {
     if (this.mode !== "user") {
       this.user.x = this.x.value;
@@ -295,12 +376,13 @@ export class CameraDirector {
       this.lastRevealPlaced = frame.placed;
       return "reveal";
     }
-    if (now < this.revealUntil) {
+    const quiet = frame.placed > 0 && frame.band.count === 0;
+    if (now < this.revealUntil || (quiet && this.mode === "reveal")) {
       return "reveal";
     }
     const idle =
       frame.placed > 0 &&
-      frame.bandCount === 0 &&
+      frame.band.count === 0 &&
       now - frame.lastPlacedAt > IDLE_WIDE_SECONDS;
     if (idle) {
       this.lastRevealAt = now;
@@ -324,26 +406,121 @@ export class CameraDirector {
     return "follow";
   }
 
-  private aspect(frame: DirectorFrame): number {
-    return Math.max(0.2, frame.viewWidth / Math.max(1, frame.viewHeight));
+  private aim(
+    view: CameraView,
+    area: DeskBounds,
+    omega: number,
+    radius: number,
+  ): void {
+    const target = this.target;
+    const wanted = this.wanted;
+    wanted.minX = area.minX;
+    wanted.maxX = area.maxX;
+    wanted.minZ = area.minZ;
+    wanted.maxZ = area.maxZ;
+    target.x = view.targetX;
+    target.z = view.targetZ;
+    target.distance = view.distance;
+    target.pitch = view.pitch;
+    target.yaw = view.yaw;
+    target.omega = omega;
+    target.radius = radius;
   }
 
-  private fov(aspect: number): number {
-    return viewFov(aspect);
+  private legibleWidth(): number {
+    return this.frame.width / LEGIBLE_PX_PER_UNIT;
+  }
+
+  private legibleDepth(): number {
+    return this.frame.height / (LEGIBLE_PX_PER_UNIT * LEGIBLE_DEPTH_SCALE);
+  }
+
+  private bandMargin(): number {
+    const roomy = Math.max(0, Math.min(1, (this.frame.width - 400) / 500));
+    return SMALL_BAND_MARGIN + (BAND_MARGIN - SMALL_BAND_MARGIN) * roomy;
+  }
+
+  private followSize(frame: DirectorFrame): AreaSize {
+    const prints = frame.prints;
+    const holding = frame.placed === 0 && frame.falling === 0;
+    const preferred = Math.max(
+      FOLLOW_MIN_WIDTH,
+      Math.min(FOLLOW_MAX_WIDTH, this.frame.width / FOLLOW_PX_PER_UNIT),
+    );
+    const growth = ARRIVAL_WIDTH + FOLLOW_GROWTH * Math.sqrt(prints);
+    const minWidth = Math.min(preferred, growth);
+    return {
+      margin: holding ? HOLD_BAND_MARGIN : this.bandMargin(),
+      minWidth,
+      minDepth: Math.max(ARRIVAL_DEPTH, minWidth * FOLLOW_DEPTH_RATIO),
+      maxWidth: Math.max(minWidth, this.legibleWidth()),
+      maxDepth: Math.max(ARRIVAL_DEPTH, this.legibleDepth()),
+    };
+  }
+
+  private focusSize(): AreaSize {
+    return {
+      margin: FOCUS_MARGIN,
+      minWidth: FOCUS_MIN_WIDTH,
+      minDepth: FOCUS_MIN_DEPTH,
+      maxWidth: Math.max(FOCUS_MIN_WIDTH, this.legibleWidth()),
+      maxDepth: Math.max(FOCUS_MIN_DEPTH, this.legibleDepth()),
+    };
+  }
+
+  private follow(frame: DirectorFrame, size: AreaSize): FrameSubject {
+    const subject = this.followSubject;
+    subject.band = frame.band;
+    subject.include = frame.front;
+    subject.anchor =
+      frame.band.count > 0
+        ? leadAnchor(
+            frame.action,
+            this.ahead(frame.action, frame.placeRate, FOLLOW_OMEGA),
+            frame.front,
+            size,
+          )
+        : centre(frame.front);
+    return subject;
+  }
+
+  private ahead(action: BandAnchor, rate: number, omega: number): GridCell {
+    const lead = Math.min(MAX_LEAD_SLOTS, Math.max(0, rate) * (LEAD_GAIN / omega));
+    return lead > 0 ? spiralPoint(action.slot + lead) : action;
+  }
+
+  private visitorFocus(frame: DirectorFrame, size: AreaSize): FrameSubject {
+    const subject = this.focusSubject;
+    const include = subject.include;
+    include.minX = frame.focusX;
+    include.maxX = frame.focusX;
+    include.minZ = frame.focusZ;
+    include.maxZ = frame.focusZ;
+    subject.band = frame.visitors;
+    if (frame.visitors.count > 1) {
+      const front = frame.front;
+      include.minX = Math.min(include.minX, front.minX);
+      include.maxX = Math.max(include.maxX, front.maxX);
+      include.minZ = Math.min(include.minZ, front.minZ);
+      include.maxZ = Math.max(include.maxZ, front.maxZ);
+      subject.anchor = leadAnchor(
+        frame.visitorAction,
+        this.ahead(frame.visitorAction, frame.placeRate, VISITOR_OMEGA),
+        frame.front,
+        size,
+      );
+    } else {
+      subject.anchor = { x: frame.focusX, z: frame.focusZ };
+    }
+    return subject;
   }
 
   private computeTarget(mode: CameraMode, frame: DirectorFrame): void {
     const target = this.target;
-    const aspect = this.aspect(frame);
-    const shift = compositionShift(aspect);
-    const fit = shiftedFit(aspect, this.fov(aspect), shift);
-    const fov = fit.fovY;
-    const fitAspect = fit.aspect;
-    target.shiftX = shift.x;
-    target.shiftY = shift.y;
+    const view = this.frame;
+    target.shiftX = view.shiftX;
+    target.shiftY = view.shiftY;
     if (mode === "user") {
-      target.shiftX = this.shiftX.value;
-      target.shiftY = this.shiftY.value;
       target.x = this.user.x;
       target.z = this.user.z;
       target.distance = this.user.distance;
@@ -354,121 +531,114 @@ export class CameraDirector {
       return;
     }
     if (mode === "focus") {
-      target.x = frame.focusX;
-      target.z = frame.focusZ + 0.05;
-      target.pitch = FOCUS_PITCH;
-      target.yaw = BASE_YAW * 0.6;
-      target.distance = fitDistance(
-        aspect < 1 ? 2.4 : 4.2,
-        aspect < 1 ? 2.8 : 2.6,
-        target.pitch,
-        fov,
-        fitAspect,
-        1,
+      const size = this.focusSize();
+      const area = focusArea(this.visitorFocus(frame, size), size);
+      const shot = frameArea(
+        area,
+        FOCUS_PITCH,
+        BASE_YAW * 0.6,
+        view.fovY,
+        view.aspect,
       );
-      target.omega = 2.1;
-      target.radius = target.distance * 0.42;
+      this.aim(
+        shot,
+        area,
+        frame.visitors.count > 1 ? VISITOR_OMEGA : FOCUS_OMEGA,
+        Math.max(shot.distance * 0.42, this.areaRadius(area)),
+      );
       return;
     }
     if (mode === "reveal") {
       const bounds = frame.bounds;
-      const margin = 1.6;
-      const width = bounds.maxX - bounds.minX + margin * 2;
-      const depth = bounds.maxZ - bounds.minZ + margin * 2;
-      target.x = (bounds.minX + bounds.maxX) / 2;
-      target.z = (bounds.minZ + bounds.maxZ) / 2 + 0.2;
-      target.pitch = REVEAL_PITCH;
-      target.yaw = BASE_YAW * 0.5;
-      target.distance = Math.max(
-        6,
-        fitDistance(width, depth, target.pitch, fov, fitAspect, 1.04),
+      const area = {
+        minX: bounds.minX - REVEAL_MARGIN,
+        maxX: bounds.maxX + REVEAL_MARGIN,
+        minZ: bounds.minZ - REVEAL_MARGIN,
+        maxZ: bounds.maxZ + REVEAL_MARGIN,
+      };
+      const shot = frameArea(
+        area,
+        REVEAL_PITCH,
+        BASE_YAW * 0.5,
+        view.fovY,
+        view.aspect,
+        REVEAL_PADDING,
       );
-      target.omega = 1.15;
-      target.radius = Math.max(4, Math.hypot(width, depth) * 0.44);
+      shot.distance = Math.max(6, shot.distance);
+      this.aim(
+        shot,
+        area,
+        REVEAL_OMEGA,
+        Math.max(4, this.areaRadius(area) * 0.88),
+      );
       return;
     }
     if (frame.prints === 0) {
-      const view = arrivalView(aspect);
-      target.shiftX = 0;
-      target.shiftY = 0;
-      target.x = view.targetX;
-      target.z = view.targetZ;
-      target.distance = view.distance;
-      target.pitch = view.pitch;
-      target.yaw = view.yaw;
-      target.radius = ARRIVAL_RADIUS;
-      target.omega = ARRIVAL_OMEGA;
+      const area = {
+        minX: -ARRIVAL_WIDTH / 2,
+        maxX: ARRIVAL_WIDTH / 2,
+        minZ: -ARRIVAL_DEPTH / 2,
+        maxZ: ARRIVAL_DEPTH / 2,
+      };
+      const shot = frameArea(
+        area,
+        ARRIVAL_PITCH,
+        BASE_YAW,
+        view.fovY,
+        view.aspect,
+      );
+      this.aim(shot, area, ARRIVAL_OMEGA, this.areaRadius(area) * 1.32);
       return;
     }
-    const cssWidth = frame.viewWidth;
-    const preferred = Math.max(5.2, Math.min(16.5, cssWidth / 88));
-    const growth = ARRIVAL_WIDTH + FOLLOW_GROWTH * Math.sqrt(frame.prints);
-    const minimumWidth = Math.min(preferred, growth);
-    const bounds = frame.bounds;
-    const mosaicX = (bounds.minX + bounds.maxX) / 2;
-    const mosaicZ = (bounds.minZ + bounds.maxZ) / 2;
-    const inwardX = mosaicX - frame.frontX;
-    const inwardZ = mosaicZ - frame.frontZ;
-    const inward = Math.hypot(inwardX, inwardZ);
-    const reach = Math.min(inward, minimumWidth * 0.3);
-    const reachX =
-      frame.frontX + (inward > 1e-3 ? (inwardX / inward) * reach : 0);
-    const reachZ =
-      frame.frontZ + (inward > 1e-3 ? (inwardZ / inward) * reach : 0);
-    const hasBand = frame.bandCount > 0;
-    const pad = hasBand ? BAND_FRONT_PAD : OPEN_FRONT_PAD;
-    const bandMargin = followMargin(aspect);
-    const minX = Math.min(
-      Math.min(frame.frontX, reachX) - pad,
-      hasBand ? frame.bandMinX - bandMargin : Number.POSITIVE_INFINITY,
+    const size = this.followSize(frame);
+    const area = followArea(this.follow(frame, size), frame.bounds, size);
+    const shot = frameArea(
+      area,
+      FOLLOW_PITCH,
+      BASE_YAW,
+      view.fovY,
+      view.aspect,
     );
-    const maxX = Math.max(
-      Math.max(frame.frontX, reachX) + pad,
-      hasBand ? frame.bandMaxX + bandMargin : Number.NEGATIVE_INFINITY,
-    );
-    const minZ = Math.min(
-      Math.min(frame.frontZ, reachZ) - pad,
-      hasBand ? frame.bandMinZ - bandMargin : Number.POSITIVE_INFINITY,
-    );
-    const maxZ = Math.max(
-      Math.max(frame.frontZ, reachZ) + pad,
-      hasBand
-        ? frame.bandMaxZ + bandMargin * NEAR_MARGIN_SCALE
-        : Number.NEGATIVE_INFINITY,
-    );
-    const width = Math.max(maxX - minX, minimumWidth);
-    const depth = Math.max(maxZ - minZ, (width / fitAspect) * 0.8, 3.6);
-    const directionX = inward > 1e-3 ? inwardX / inward : 0;
-    const directionZ = inward > 1e-3 ? inwardZ / inward : 0;
-    target.x = (minX + maxX) / 2 + directionX * (width - (maxX - minX)) * 0.5;
-    target.z =
-      (minZ + maxZ) / 2 + directionZ * (depth - (maxZ - minZ)) * 0.5 + 0.15;
-    target.pitch = FOLLOW_PITCH;
-    target.yaw = BASE_YAW;
-    target.distance = fitDistance(
-      width,
-      depth,
-      target.pitch,
-      fov,
-      fitAspect,
-      1,
-    );
-    target.radius = Math.max(width, depth * 0.9) * 0.5;
-    target.omega = 1.45;
+    this.aim(shot, area, FOLLOW_OMEGA, this.areaRadius(area));
+  }
+
+  private areaRadius(area: DeskBounds): number {
+    const width = area.maxX - area.minX;
+    const depth = area.maxZ - area.minZ;
+    return Math.max(width, depth * 0.9) * 0.5;
   }
 
   private shouldRecut(): boolean {
     const target = this.target;
-    const drift = Math.hypot(target.x - this.heldX, target.z - this.heldZ);
-    const zoom = Math.abs(
-      Math.log(target.distance / Math.max(0.1, this.heldDistance)),
+    const shifted =
+      Math.abs(target.shiftX - this.heldShiftX) > RECUT_SHIFT ||
+      Math.abs(target.shiftY - this.heldShiftY) > RECUT_SHIFT;
+    const zoom = Math.log(target.distance / Math.max(0.1, this.heldDistance));
+    const held = this.held;
+    held.targetX = this.heldX;
+    held.targetZ = this.heldZ;
+    held.distance = this.heldDistance;
+    held.pitch = target.pitch;
+    held.yaw = target.yaw;
+    const extent = screenExtent(
+      this.wanted,
+      held,
+      this.frame.fovY,
+      this.frame.aspect,
     );
-    if (drift > target.distance * 0.22 || zoom > 0.25) {
+    const spills =
+      extent.minX < -RECUT_SPILL ||
+      extent.maxX > RECUT_SPILL ||
+      extent.minY < -RECUT_SPILL ||
+      extent.maxY > RECUT_SPILL;
+    if (shifted || spills || zoom < -RECUT_ZOOM) {
       return true;
     }
     target.x = this.heldX;
     target.z = this.heldZ;
     target.distance = this.heldDistance;
+    target.shiftX = this.heldShiftX;
+    target.shiftY = this.heldShiftY;
     return false;
   }
 
@@ -493,11 +663,15 @@ export class CameraDirector {
     this.heldX = target.x;
     this.heldZ = target.z;
     this.heldDistance = target.distance;
+    this.heldShiftX = target.shiftX;
+    this.heldShiftY = target.shiftY;
   }
 
   private apply(viewWidth: number, viewHeight: number): void {
     const camera = this.camera;
-    const aspect = Math.max(0.2, viewWidth / Math.max(1, viewHeight));
+    const width = Math.max(1, viewWidth);
+    const height = Math.max(1, viewHeight);
+    const aspect = Math.max(0.2, width / height);
     const distance = Math.exp(this.logDistance.value);
     const yaw = this.yaw.value + this.parallaxX.value * 0.022;
     const pitch = this.pitch.value - this.parallaxY.value * 0.014;
@@ -510,7 +684,7 @@ export class CameraDirector {
       targetZ + Math.cos(yaw) * horizontal,
     );
     camera.lookAt(targetX, 0, targetZ);
-    const fov = this.fov(aspect) / DEG;
+    const fov = this.frame.cameraFovY / DEG;
     const near = Math.max(0.08, distance * 0.12);
     const shiftX = this.shiftX.value;
     const shiftY = this.shiftY.value;
@@ -519,15 +693,15 @@ export class CameraDirector {
       Math.abs(near - this.lastNear) > near * 0.01 ||
       Math.abs(aspect - this.lastAspect) > 1e-4 ||
       Math.abs(shiftX - this.lastShiftX) > 1e-5 ||
-      Math.abs(shiftY - this.lastShiftY) > 1e-5
+      Math.abs(shiftY - this.lastShiftY) > 1e-5 ||
+      width !== this.lastWidth ||
+      height !== this.lastHeight
     ) {
       camera.fov = fov;
       camera.aspect = aspect;
       camera.near = near;
       camera.far = distance * 4 + 80;
       if (Math.abs(shiftX) > 1e-6 || Math.abs(shiftY) > 1e-6) {
-        const width = Math.max(1, viewWidth);
-        const height = Math.max(1, viewHeight);
         camera.setViewOffset(
           width,
           height,
@@ -545,6 +719,8 @@ export class CameraDirector {
       this.lastAspect = aspect;
       this.lastShiftX = shiftX;
       this.lastShiftY = shiftY;
+      this.lastWidth = width;
+      this.lastHeight = height;
     }
   }
 }

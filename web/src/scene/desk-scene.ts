@@ -13,12 +13,13 @@ import type {
   NewPrint,
   Quarter,
   ScreenPoint,
+  ViewInsets,
 } from "../contracts";
 import {
   cellSlot,
+  frontCells,
   matHalfSize,
   mosaicBounds,
-  spiralCell,
 } from "../core/layout";
 import { mulberry32 } from "../core/random";
 import { DESKTOP_ATLAS, LOW_POWER_ATLAS, PrintAtlas } from "./atlas";
@@ -33,6 +34,7 @@ import { type DeskMat, createMat } from "./mat";
 import { PALETTE } from "./palette";
 import { DeskPicker } from "./picking";
 import {
+  type BandAction,
   type BandExtent,
   PLACED_Y,
   PrintFleet,
@@ -57,6 +59,13 @@ export interface DeskSceneStats {
   frames: number;
   pixelRatio: number;
   mode: string;
+  camera: { x: number; z: number; distance: number };
+  wanted: { minX: number; maxX: number; minZ: number; maxZ: number };
+  band: BandExtent;
+  action: BandAction;
+  visitors: BandExtent;
+  visitorAction: BandAction;
+  insets: ViewInsets;
 }
 
 type HoverHandler = DeskSceneEvents["hover"];
@@ -71,6 +80,7 @@ const SLOW_FRAME_MS = 22;
 const SLOW_WINDOW_SECONDS = 2;
 const REDUCED_PIXEL_RATIO = 1.25;
 const MAX_FRAME_STEP = 0.1;
+const FRONT_LOOKAHEAD = 3;
 
 function clock(): number {
   return performance.now() / 1000;
@@ -95,6 +105,10 @@ function createContext(canvas: HTMLCanvasElement): WebGL2RenderingContext {
     throw new WebGLUnavailableError();
   }
   return context;
+}
+
+function cssLength(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 10) / 10 : 0;
 }
 
 function closeImage(image: ImageBitmap): void {
@@ -131,6 +145,33 @@ class SortingDesk implements DeskScene {
     maxX: 0,
     minZ: 0,
     maxZ: 0,
+  };
+  private readonly visitors: BandExtent = {
+    count: 0,
+    minX: 0,
+    maxX: 0,
+    minZ: 0,
+    maxZ: 0,
+  };
+  private readonly action: BandAction = {
+    count: 0,
+    oldest: 0,
+    x: 0,
+    z: 0,
+    slot: 0,
+  };
+  private readonly visitorAction: BandAction = {
+    count: 0,
+    oldest: 0,
+    x: 0,
+    z: 0,
+    slot: 0,
+  };
+  private readonly insets: ViewInsets = {
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   };
   private readonly hoverHandlers = new Set<HoverHandler>();
   private readonly selectHandlers = new Set<SelectHandler>();
@@ -397,6 +438,30 @@ class SortingDesk implements DeskScene {
     this.wake();
   }
 
+  setViewInsets(insets: ViewInsets): void {
+    if (this.disposed) {
+      return;
+    }
+    const next = this.insets;
+    const top = cssLength(insets.top);
+    const right = cssLength(insets.right);
+    const bottom = cssLength(insets.bottom);
+    const left = cssLength(insets.left);
+    if (
+      top === next.top &&
+      right === next.right &&
+      bottom === next.bottom &&
+      left === next.left
+    ) {
+      return;
+    }
+    next.top = top;
+    next.right = right;
+    next.bottom = bottom;
+    next.left = left;
+    this.wake();
+  }
+
   on<K extends keyof DeskSceneEvents>(
     event: K,
     handler: DeskSceneEvents[K],
@@ -460,6 +525,17 @@ class SortingDesk implements DeskScene {
       frames: this.framesRendered,
       pixelRatio: this.pixelRatio,
       mode: this.director.mode,
+      camera: {
+        x: this.director.targetX,
+        z: this.director.targetZ,
+        distance: this.director.distance,
+      },
+      wanted: { ...this.director.wantedArea },
+      band: { ...this.band },
+      action: { ...this.action },
+      visitors: { ...this.visitors },
+      visitorAction: { ...this.visitorAction },
+      insets: { ...this.insets },
     };
   }
 
@@ -583,19 +659,27 @@ class SortingDesk implements DeskScene {
 
   private stepCamera(now: number, dt: number): boolean {
     const fleet = this.fleet;
-    const band = fleet.bandExtent(this.band);
-    const front = spiralCell(fleet.highestSlot + 1);
+    const falling = fleet.bandExtent(
+      this.band,
+      this.visitors,
+      this.action,
+      this.visitorAction,
+    );
+    const front =
+      falling > 0 || this.band.count === 0
+        ? frontCells(fleet.highestSlot + 1, FRONT_LOOKAHEAD)
+        : frontCells(fleet.highestSlot, 1);
     const focus = this.focusEntry();
     return this.director.update({
       now,
       dt,
-      frontX: front.x,
-      frontZ: front.z,
-      bandMinX: band.minX,
-      bandMaxX: band.maxX,
-      bandMinZ: band.minZ,
-      bandMaxZ: band.maxZ,
-      bandCount: band.count,
+      front,
+      band: this.band,
+      visitors: this.visitors,
+      action: this.action,
+      visitorAction: this.visitorAction,
+      placeRate: fleet.placementRate(now),
+      falling,
       prints: fleet.size,
       placed: fleet.placedCount,
       lastPlacedAt: fleet.lastPlacedAt,
@@ -606,6 +690,7 @@ class SortingDesk implements DeskScene {
       holdWide: fleet.scattering,
       viewWidth: this.viewWidth,
       viewHeight: this.viewHeight,
+      insets: this.insets,
     });
   }
 
@@ -627,6 +712,7 @@ class SortingDesk implements DeskScene {
     shared.uLampCenter.value.set(x - radius * 0.22, z - radius * 0.16);
     shared.uFogCenter.value.set(x, z - radius * 0.1);
     shared.uFogRange.value.set(radius * 0.95, radius * 2.3);
+    shared.uViewShift.value.set(director.viewShiftX, director.viewShiftY);
     this.printUniforms.uSoftbox.value.set(distance * 0.13, distance * 0.075);
   }
 

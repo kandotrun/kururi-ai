@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GATHER,
   INTRO_DURATION_MS,
   INTRO_SECONDS,
   PHASE_STARTS,
@@ -25,19 +26,19 @@ describe("phases", () => {
       "handoff",
       "done",
     ]);
-    expect(INTRO_DURATION_MS).toBe(9600);
-    expect(INTRO_SECONDS).toBeCloseTo(9.6, 12);
+    expect(INTRO_DURATION_MS).toBe(10000);
+    expect(INTRO_SECONDS).toBeCloseTo(10, 12);
   });
 
   it("reports the phase that started last", () => {
     expect(phaseAt(0)).toBe("space");
-    expect(phaseAt(0.99)).toBe("space");
-    expect(phaseAt(1.0)).toBe("gather");
-    expect(phaseAt(3.3)).toBe("descent");
-    expect(phaseAt(6)).toBe("city");
-    expect(phaseAt(7.5)).toBe("room");
-    expect(phaseAt(9.1)).toBe("handoff");
-    expect(phaseAt(9.6)).toBe("done");
+    expect(phaseAt(0.89)).toBe("space");
+    expect(phaseAt(0.9)).toBe("gather");
+    expect(phaseAt(4.0)).toBe("descent");
+    expect(phaseAt(6.2)).toBe("city");
+    expect(phaseAt(8.0)).toBe("room");
+    expect(phaseAt(9.5)).toBe("handoff");
+    expect(phaseAt(10)).toBe("done");
     expect(phaseAt(40)).toBe("done");
     expect(phaseAt(-1)).toBe("space");
   });
@@ -45,8 +46,8 @@ describe("phases", () => {
   it("lists the phases crossed by a frame step in order", () => {
     expect(phasesBetween(-1, 0)).toEqual(["space"]);
     expect(phasesBetween(0, 0.5)).toEqual([]);
-    expect(phasesBetween(0.9, 3.3)).toEqual(["gather", "descent"]);
-    expect(phasesBetween(8.9, 20)).toEqual(["handoff", "done"]);
+    expect(phasesBetween(0.8, 4.0)).toEqual(["gather", "descent"]);
+    expect(phasesBetween(9.3, 20)).toEqual(["handoff", "done"]);
   });
 });
 
@@ -57,7 +58,7 @@ describe("stageMix", () => {
     expect(space.city).toBe(0);
     expect(space.room).toBe(0);
     expect(space.fade).toBe(1);
-    const room = sample(8.6);
+    const room = sample(9.0);
     expect(room.room).toBe(1);
     expect(room.globe).toBe(0);
     expect(room.city).toBe(0);
@@ -83,10 +84,16 @@ describe("stageMix", () => {
   });
 
   it("fades the canvas out during the hand-off only", () => {
-    expect(sample(8.99).fade).toBe(1);
-    expect(sample(9.3).fade).toBeGreaterThan(0.2);
-    expect(sample(9.3).fade).toBeLessThan(0.8);
-    expect(sample(9.6).fade).toBe(0);
+    expect(sample(9.39).fade).toBe(1);
+    expect(sample(9.7).fade).toBeGreaterThan(0.2);
+    expect(sample(9.7).fade).toBeLessThan(0.8);
+    expect(sample(10).fade).toBe(0);
+  });
+
+  it("gives the gathering beat room before the descent", () => {
+    expect(GATHER.arrivalEnd).toBeLessThanOrEqual(PHASE_STARTS[2]![1]);
+    expect(GATHER.arrivalEnd - GATHER.launchStart).toBeGreaterThanOrEqual(2.5);
+    expect(sample(GATHER.arrivalEnd).globe).toBe(1);
   });
 
   it("changes continuously", () => {

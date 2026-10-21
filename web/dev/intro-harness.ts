@@ -11,6 +11,7 @@ import {
 
 interface IntroHarness {
   controller: IntroController;
+  desk: DeskHandle | null;
   ready: Promise<boolean>;
   readonly phase: IntroPhase | null;
   readonly time: number;
@@ -91,6 +92,42 @@ async function manifestOrigins(): Promise<GeoPoint[]> {
   }
 }
 
+interface DeskHandle {
+  hide(hidden: boolean): void;
+}
+
+async function mountDesk(stage: HTMLElement): Promise<DeskHandle | null> {
+  const placeholder = stage.querySelector<HTMLElement>("#desk");
+  const canvas = document.createElement("canvas");
+  canvas.id = "desk-canvas";
+  Object.assign(canvas.style, {
+    position: "absolute",
+    inset: "0",
+    width: "100%",
+    height: "100%",
+    display: "block",
+    zIndex: "0",
+  });
+  try {
+    const module = await import("../src/scene/desk-scene");
+    placeholder?.remove();
+    stage.prepend(canvas);
+    const scene = module.createDeskScene(canvas, {
+      reducedMotion: false,
+      lowPower: false,
+    });
+    scene.start();
+    return {
+      hide(hidden: boolean) {
+        canvas.style.visibility = hidden ? "hidden" : "visible";
+      },
+    };
+  } catch (error) {
+    console.warn("desk scene unavailable", error);
+    return null;
+  }
+}
+
 async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const stillMs = params.has("t") ? Number(params.get("t")) : null;
@@ -102,6 +139,7 @@ async function main(): Promise<void> {
   const skipButton = document.querySelector<HTMLButtonElement>("#skip")!;
   const stage = document.querySelector<HTMLElement>("#stage")!;
   hud.hidden = params.get("hud") !== "1";
+  const desk = params.get("desk") === "scene" ? await mountDesk(stage) : null;
 
   let origins: GeoPoint[] = [];
   let source = "empty";
@@ -152,6 +190,7 @@ async function main(): Promise<void> {
 
   window.__intro = {
     controller,
+    desk,
     ready: controller.ready,
     get phase() {
       return controller.phase;

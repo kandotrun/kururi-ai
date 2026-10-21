@@ -1,5 +1,6 @@
 import type {
   DeskStats,
+  FolderProgress,
   ModelId,
   ModelOption,
   ModelProgress,
@@ -8,6 +9,7 @@ import type {
   Quarter,
   StreamStatus,
 } from "../contracts";
+import { placeLabel } from "../core/geo";
 import { expectedCorrection } from "../core/rotation";
 import {
   correctionPhrase,
@@ -87,6 +89,10 @@ export function creditText(source: PhotoSource): string {
   return source.attribution
     ? `${source.attribution.author} / ${source.attribution.license}`
     : "Wikimedia Commons";
+}
+
+export function photoPlace(source: PhotoSource): string | null {
+  return source.kind === "user" ? null : placeLabel(source.location);
 }
 
 export function loupeRotation(record: PhotoRecord): number {
@@ -206,4 +212,30 @@ export function modelLoadingNote(progress: ModelProgress): string {
   }
   const percent = Math.floor((Math.max(0, progress.loaded) / progress.total) * 100);
   return `読み込み中 ${percent}%`;
+}
+
+export const NO_PHOTO_FILES_NOTICE =
+  "写真が見つかりませんでした。JPEG、PNG、WebP、DNG などの写真を選んでください。";
+
+export function folderScanText(photos: number): string {
+  return photos > 0
+    ? `フォルダを読み込み中 ${formatCount(photos)}枚`
+    : "フォルダを読み込み中";
+}
+
+export function folderProgressText(progress: FolderProgress): string {
+  const left =
+    progress.skipped > 0
+      ? `（動画など ${formatCount(progress.skipped)}件は対象外）`
+      : "";
+  if (progress.accepted > 0) {
+    return `${formatCount(progress.accepted)}枚を並べます${left}`;
+  }
+  return progress.skipped > 0
+    ? `並べられる写真がありませんでした${left}`
+    : "写真が見つかりませんでした";
+}
+
+export function folderTruncatedText(limit: number): string {
+  return `フォルダの中のファイルが多いため、最初の ${formatCount(limit)}件だけ読み込みました。`;
 }

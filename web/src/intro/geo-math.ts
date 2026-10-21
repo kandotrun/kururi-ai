@@ -120,7 +120,7 @@ export function greatCircle(
 
 export function arcLift(angle: number): number {
   const reach = Math.max(0, Math.min(1, angle / Math.PI));
-  return 0.012 + 0.2 * Math.pow(reach, 0.85);
+  return 0.016 + 0.3 * Math.pow(reach, 0.9);
 }
 
 export function localFrame(point: GeoPoint): LocalFrame {

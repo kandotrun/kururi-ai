@@ -1,5 +1,6 @@
 import type {
   DeskStats,
+  GeoPlace,
   ModelId,
   ModelOption,
   Overlay,
@@ -9,8 +10,10 @@ import type {
   Quarter,
   ScreenPoint,
   StreamStatus,
+  ViewInsets,
 } from "../src/contracts";
 import { modelOptions } from "../src/core/model-profiles";
+import { splitPhotoFiles } from "../src/core/photo-files";
 import { isCorrect, normalizeQuarter } from "../src/core/rotation";
 import { mountOverlay } from "../src/ui/overlay";
 
@@ -29,7 +32,12 @@ type HarnessState =
   | "full-running"
   | "confirm"
   | "full-unavailable"
-  | "nano-only";
+  | "nano-only"
+  | "intro"
+  | "folder-scan"
+  | "folder-ready"
+  | "folder-empty"
+  | "place";
 
 const STATES: readonly HarnessState[] = [
   "crooked",
@@ -47,6 +55,24 @@ const STATES: readonly HarnessState[] = [
   "confirm",
   "full-unavailable",
   "nano-only",
+  "intro",
+  "folder-scan",
+  "folder-ready",
+  "folder-empty",
+  "place",
+];
+
+const PLACES: ReadonlyArray<GeoPlace | null> = [
+  { lat: 46.36, lon: 14.09, country: "SI" },
+  { lat: 35.04, lon: 135.73, country: "JP" },
+  { lat: 44.15, lon: 28.6, country: "RO" },
+  { lat: 43.83, lon: 5.79, country: "FR" },
+  { lat: 32.66, lon: 51.68, country: "IR" },
+  null,
+  { lat: 48.21, lon: 16.37, country: "AT" },
+  { lat: 35.52, lon: 138.75, country: "JP" },
+  { lat: 63.4, lon: -19.0, country: null },
+  { lat: 48.81, lon: 14.32, country: "CZ" },
 ];
 
 const SAMPLE_FILES = [
@@ -85,6 +111,7 @@ const params = new URLSearchParams(window.location.search);
 const requested = params.get("state");
 const state: HarnessState = STATES.find((item) => item === requested) ?? "running";
 const live = params.has("live");
+const showInsets = params.has("insets");
 const base = new URL("../", window.location.href);
 const sampleUrls = SAMPLE_FILES.map(
   (item) => new URL(`samples/${item.file}`, base).href,
@@ -131,6 +158,7 @@ function commonsSource(index: number): PhotoSource {
       pageUrl: `https://commons.wikimedia.org/wiki/File:Example_${index}.jpg`,
     },
     uprightFix: 0,
+    location: PLACES[index % PLACES.length] ?? null,
   };
 }
 
@@ -336,9 +364,41 @@ const modelCalls: ModelId[] = [];
 let currentStatus: StreamStatus = "running";
 const recordsById = new Map<string, PhotoRecord>();
 
+const folderCalls: Array<{ found: number; accepted: number; skipped: number }> = [];
+const skipCalls: number[] = [];
+
+function emulateMainAddFiles(files: File[]): void {
+  const { photos, skipped } = splitPhotoFiles(files);
+  folderCalls.push({ found: files.length, accepted: photos.length, skipped });
+  overlay.setFolderProgress({
+    found: files.length,
+    accepted: photos.length,
+    skipped,
+    done: false,
+  });
+  if (!params.has("hold")) {
+    window.setTimeout(() => {
+      overlay.setFolderProgress({
+        found: files.length,
+        accepted: photos.length,
+        skipped,
+        done: true,
+      });
+    }, 5000);
+  }
+}
+
 const overlay = mountOverlay(document.querySelector<HTMLElement>("#app")!, {
   addFiles(files) {
-    console.info("addFiles", files.map((file) => file.name));
+    console.info("addFiles", files.map((file) => file.webkitRelativePath || file.name));
+    emulateMainAddFiles(files);
+  },
+  skipIntro() {
+    skipCalls.push(performance.now());
+    window.setTimeout(() => {
+      document.querySelector(".fake-intro")?.remove();
+      overlay.setIntroActive(false);
+    }, 320);
   },
   togglePause() {
     currentStatus = currentStatus === "paused" ? "running" : "paused";
@@ -405,7 +465,127 @@ function startStory(): void {
   }, 180);
 }
 
+interface FakeEntry {
+  readonly name: string;
+  readonly fullPath: string;
+  readonly isFile: boolean;
+  readonly isDirectory: boolean;
+  createReader(): { readEntries(done: (entries: FakeEntry[]) => void): void };
+  file(done: (file: File) => void): void;
+}
+
+function fakeFolder(
+  name: string,
+  counts: { photos: number; videos: number; raw: number; other: number },
+  delayMs: number,
+): FakeEntry {
+  const names: string[] = [];
+  for (let index = 1; index <= counts.photos; index += 1) {
+    names.push(`IMG_${String(index).padStart(4, "0")}.JPG`);
+  }
+  for (let index = 1; index <= counts.raw; index += 1) {
+    names.push(`RAW_${String(index).padStart(4, "0")}.DNG`);
+  }
+  for (let index = 1; index <= counts.videos; index += 1) {
+    names.push(`CLIP_${String(index).padStart(4, "0")}.MOV`);
+  }
+  for (let index = 1; index <= counts.other; index += 1) {
+    names.push(index === 1 ? ".DS_Store" : `NOTE_${index}.TXT`);
+  }
+  const fullPath = `/${name}`;
+  const children: FakeEntry[] = names.map((child) => ({
+    name: child,
+    fullPath: `${fullPath}/${child}`,
+    isFile: true,
+    isDirectory: false,
+    createReader: () => ({ readEntries: (done) => done([]) }),
+    file(done) {
+      window.setTimeout(() => done(new File([new Uint8Array([0xff, 0xd8])], child)), delayMs);
+    },
+  }));
+  return {
+    name,
+    fullPath,
+    isFile: false,
+    isDirectory: true,
+    createReader() {
+      let offset = 0;
+      return {
+        readEntries(done) {
+          window.setTimeout(() => {
+            const batch = children.slice(offset, offset + 100);
+            offset += batch.length;
+            done(batch);
+          }, delayMs);
+        },
+      };
+    },
+    file() {},
+  };
+}
+
+function dropFakeFolder(folder: FakeEntry): void {
+  const transfer = new DataTransfer();
+  transfer.items.add(new File([new Uint8Array([0])], folder.name));
+  const original = DataTransferItem.prototype.webkitGetAsEntry;
+  Object.defineProperty(DataTransferItem.prototype, "webkitGetAsEntry", {
+    configurable: true,
+    value() {
+      return folder;
+    },
+  });
+  window.dispatchEvent(new DragEvent("dragenter", { dataTransfer: transfer }));
+  window.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, cancelable: true }));
+  Object.defineProperty(DataTransferItem.prototype, "webkitGetAsEntry", {
+    configurable: true,
+    value: original,
+  });
+}
+
+function paintIntro(): void {
+  const sky = document.createElement("div");
+  sky.className = "fake-intro";
+  Object.assign(sky.style, {
+    position: "absolute",
+    inset: "0",
+    zIndex: "1",
+    pointerEvents: "none",
+    background:
+      "radial-gradient(circle at 62% 58%, rgb(40 90 160 / 0.9) 0 17%, rgb(120 180 255 / 0.35) 17.6%, rgb(0 0 0 / 0) 19%), radial-gradient(1px 1px at 20% 30%, #fff 50%, transparent 51%) 0 0 / 140px 120px, radial-gradient(1px 1px at 70% 80%, #cfe 50%, transparent 51%) 0 0 / 190px 170px, #02040a",
+  });
+  document.querySelector("#app")?.append(sky);
+}
+
+function drawInsets(insets: ViewInsets): void {
+  let frame = document.querySelector<HTMLElement>(".inset-frame");
+  if (!frame) {
+    frame = document.createElement("div");
+    frame.className = "inset-frame";
+    document.body.append(frame);
+  }
+  Object.assign(frame.style, {
+    position: "fixed",
+    top: `${insets.top}px`,
+    right: `${insets.right}px`,
+    bottom: `${insets.bottom}px`,
+    left: `${insets.left}px`,
+    zIndex: "50",
+    outline: "2px dashed #ff3bd4",
+    outlineOffset: "-2px",
+    background: "rgb(255 59 212 / 0.06)",
+    pointerEvents: "none",
+  });
+  frame.textContent = `${insets.top} ${insets.right} ${insets.bottom} ${insets.left}`;
+  frame.style.color = "#ff3bd4";
+  frame.style.font = "600 12px/1.4 monospace";
+  frame.style.padding = "6px";
+}
+
 async function run(): Promise<void> {
+  if (showInsets) {
+    overlay.onViewInsetsChange(drawInsets);
+    window.requestAnimationFrame(() => drawInsets(overlay.viewInsets()));
+  }
   const ready = { loaded: 11_908_441, total: 11_908_441, ready: true };
   const fullTotal = 551_055_739;
   const current: ModelId =
@@ -419,6 +599,14 @@ async function run(): Promise<void> {
     if (live) {
       startStory();
     }
+    return;
+  }
+  if (state === "intro") {
+    overlay.setIntroActive(true);
+    overlay.setModelProgress({ loaded: 4_200_000, total: 11_908_441, ready: false });
+    overlay.setStatus("loading-model");
+    overlay.setStats(statsFor(0, total, 12));
+    paintIntro();
     return;
   }
   if (state === "full-loading") {
@@ -471,6 +659,22 @@ async function run(): Promise<void> {
     transfer.items.add(new File([new Uint8Array([1])], "photo.jpg", { type: "image/jpeg" }));
     window.dispatchEvent(new DragEvent("dragenter", { dataTransfer: transfer, bubbles: true }));
   }
+  if (state === "folder-scan") {
+    dropFakeFolder(fakeFolder("Photos", { photos: 740, raw: 0, videos: 419, other: 0 }, 40));
+  }
+  if (state === "folder-ready") {
+    dropFakeFolder(fakeFolder("Photos", { photos: 160, raw: 580, videos: 417, other: 2 }, 0));
+  }
+  if (state === "folder-empty") {
+    dropFakeFolder(fakeFolder("Clips", { photos: 0, raw: 0, videos: 24, other: 1 }, 0));
+  }
+  if (state === "place") {
+    const target = records.find((item) => item.source.kind === "commons" && item.source.location?.country === "JP");
+    if (target) {
+      overlay.showLoupe(target, centrePoint());
+      overlay.pin(target);
+    }
+  }
   if (state === "confirm") {
     document.querySelector<HTMLInputElement>("input[value='full']")?.click();
   }
@@ -488,6 +692,11 @@ void run().then(() => {
 });
 
 Object.assign(window, {
+  harnessFolderCalls: folderCalls,
+  harnessSkipCalls: skipCalls,
+  harnessDropFakeFolder: dropFakeFolder,
+  harnessFakeFolder: fakeFolder,
+  harnessPaintIntro: paintIntro,
   harnessOverlay: overlay,
   harnessRecords: records,
   harnessModelCalls: modelCalls,

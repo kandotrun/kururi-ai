@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { DeskPose, Quarter } from "../contracts";
 import {
   FLIGHT_SECONDS,
+  MARK_LEAD_SECONDS,
+  MARK_WRITE_SECONDS,
   STRAIGHTEN_LIFT,
   STRAIGHTEN_SECONDS,
   UNSETTLE_LIFT,
@@ -21,6 +23,7 @@ import {
   slidePose,
   springSettled,
   springStep,
+  straightenStart,
   turnInPlacePose,
 } from "./motion";
 import { mulberry32 } from "./random";
@@ -406,5 +409,22 @@ describe("replayDelay", () => {
     const last = replayDelay(count - 1, count, FLIGHT_SECONDS);
     expect(last + FLIGHT_SECONDS).toBeLessThanOrEqual(4 + 1e-9);
     expect(replayDelay(count / 2, count, FLIGHT_SECONDS)).toBeLessThan(last);
+  });
+});
+
+describe("straightenStart", () => {
+  it("lets the top mark be written before the print turns", () => {
+    expect(MARK_LEAD_SECONDS).toBeGreaterThanOrEqual(MARK_WRITE_SECONDS);
+    expect(MARK_LEAD_SECONDS).toBeLessThan(0.6);
+    expect(straightenStart(10.1, 10)).toBeCloseTo(10 + MARK_LEAD_SECONDS);
+  });
+
+  it("starts at once when the mark is already on the print", () => {
+    expect(straightenStart(12, 10)).toBe(12);
+  });
+
+  it("starts at once when there is no mark to wait for", () => {
+    expect(straightenStart(3, Number.NaN)).toBe(3);
+    expect(straightenStart(3, Number.NEGATIVE_INFINITY)).toBe(3);
   });
 });

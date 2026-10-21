@@ -1429,6 +1429,159 @@ describe("rate limits", () => {
   });
 });
 
+describe("visitor batches", () => {
+  function files(count: number, prefix = "mine"): File[] {
+    return Array.from({ length: count }, (_, index) =>
+      file(`${prefix}-${index}.jpg`),
+    );
+  }
+
+  it("drops Commons photos that have not started to make room for a large batch", async () => {
+    const h = harness({
+      sources: many(100),
+      maxPrints: 100,
+      maxLoading: 2,
+      maxPile: 4,
+    });
+    h.stream.start();
+    await tick(0);
+    expect(h.loader.calls).toEqual(["c0", "c1"]);
+    expect(h.store.getState().total).toBe(90);
+    h.stream.addUserFiles(files(30));
+    expect(h.store.getState().total).toBe(100);
+    expect(h.notices).toEqual([]);
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.settings.reducedMotion = true;
+    h.loader.succeed("c0");
+    h.loader.succeed("c1");
+    await tick(20_000);
+    const records = h.store.getState().records;
+    expect(records.size).toBe(100);
+    expect([...records.values()].every((record) => record.phase === "placed")).toBe(
+      true,
+    );
+    expect(h.loader.calls.filter((id) => id.startsWith("user-"))).toHaveLength(30);
+    expect(h.loader.calls).toContain("c69");
+    expect(h.loader.calls).not.toContain("c70");
+    expect(h.loader.calls).not.toContain("c89");
+    expect(h.statuses.at(-1)).toBe("finished");
+    expect(h.violations).toEqual([]);
+  });
+
+  it("loads the whole batch before the Commons photos that are left", async () => {
+    const h = harness({ sources: many(40), maxPrints: 40, maxLoading: 1 });
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.settings.reducedMotion = true;
+    h.stream.addUserFiles(files(20));
+    h.stream.start();
+    await tick(20_000);
+    expect(h.loader.calls.slice(0, 20).every((id) => id.startsWith("user-"))).toBe(
+      true,
+    );
+    expect(h.loader.calls).toHaveLength(40);
+    expect(h.store.getState().total).toBe(40);
+  });
+
+  it("reports how many photos were left out once no Commons photo can make room", async () => {
+    const h = harness({ sources: many(20), maxPrints: 30, reducedMotion: true });
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.stream.start();
+    await tick(5_000);
+    expect(h.statuses.at(-1)).toBe("finished");
+    h.stream.addUserFiles(files(15));
+    expect(h.notices.at(-1)).toBe(
+      "机がいっぱいなので、5枚は並べられませんでした。",
+    );
+    expect(h.store.getState().total).toBe(30);
+    await tick(5_000);
+    expect(h.store.getState().records.size).toBe(30);
+    expect(h.loader.calls.filter((id) => id.startsWith("user-"))).toHaveLength(10);
+  });
+
+  it("formats large numbers of photos left out", async () => {
+    const h = harness({ sources: [], maxPrints: 10 });
+    h.stream.start();
+    h.stream.addUserFiles(files(1_244));
+    expect(h.notices.at(-1)).toBe(
+      "机がいっぱいなので、1,234枚は並べられませんでした。",
+    );
+  });
+
+  it("keeps samples and photos already on their way", async () => {
+    const sources = [...many(10), sample(10, 2)];
+    const h = harness({ sources, maxPrints: 12, maxLoading: 2, maxPile: 2 });
+    h.stream.start();
+    await tick(0);
+    expect(h.loader.calls).toEqual(["c0", "c1"]);
+    h.stream.addUserFiles(files(12));
+    expect(h.notices.at(-1)).toBe(
+      "机がいっぱいなので、3枚は並べられませんでした。",
+    );
+    expect(h.store.getState().total).toBe(12);
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.settings.reducedMotion = true;
+    h.loader.succeed("c0");
+    h.loader.succeed("c1");
+    await tick(10_000);
+    const ids = [...h.store.getState().records.keys()];
+    expect(ids).toHaveLength(12);
+    expect(ids).toContain("s10");
+    expect(ids.filter((id) => id.startsWith("c"))).toEqual(["c0", "c1"]);
+    expect(h.violations).toEqual([]);
+  });
+
+  it("counts visitor photos from earlier drops when making room", async () => {
+    const h = harness({ sources: many(10), maxPrints: 20, maxLoading: 1 });
+    h.stream.start();
+    await tick(0);
+    h.stream.addUserFiles(files(8, "first"));
+    h.stream.addUserFiles(files(8, "second"));
+    expect(h.store.getState().total).toBe(20);
+    expect(h.notices).toEqual([]);
+    h.stream.addUserFiles(files(4, "third"));
+    expect(h.store.getState().total).toBe(20);
+    expect(h.notices.at(-1)).toBe(
+      "机がいっぱいなので、1枚は並べられませんでした。",
+    );
+  });
+
+  it("follows a large batch as a whole instead of focusing every photo", async () => {
+    const h = harness({ sources: [], reducedMotion: true, poolSize: 2 });
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.stream.start();
+    h.stream.addUserFiles([file("single.jpg")]);
+    await tick(0);
+    expect(h.scene.log).toContain("focus:user-1");
+    h.stream.addUserFiles(files(6));
+    await tick(0);
+    const focusCalls = h.scene.log.filter((entry) => entry.startsWith("focus:"));
+    expect(focusCalls).toEqual(["focus:user-1", "focus:null"]);
+    await tick(5_000);
+    expect(h.scene.log.filter((entry) => entry.startsWith("focus:user"))).toEqual([
+      "focus:user-1",
+    ]);
+  });
+
+  it("still focuses each photo of a small drop", async () => {
+    const h = harness({ sources: [], reducedMotion: true, poolSize: 1 });
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.stream.start();
+    h.stream.addUserFiles(files(3));
+    await tick(5_000);
+    expect(h.scene.log.filter((entry) => entry.startsWith("focus:user"))).toEqual([
+      "focus:user-1",
+      "focus:user-2",
+      "focus:user-3",
+    ]);
+  });
+});
+
 describe("stress", () => {
   it("keeps every limit with an opening hold, rate limits and failures at random", async () => {
     const random = mulberry32(7);

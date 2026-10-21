@@ -31,23 +31,6 @@ export const HERO_WINDOW = {
   height: 2.2,
 } as const;
 
-export const ROOM = {
-  deskHalfWidth: 11,
-  deskHalfDepth: 7.5,
-  deskThickness: 0.6,
-  matHalfWidth: 10,
-  matHalfDepth: 6.5,
-  floorY: -5.2,
-  ceilingY: 14,
-  halfWidth: 24,
-  backZ: -18,
-  windowZ: 14,
-  wallThickness: 1.4,
-  windowHalfWidth: 6.5,
-  windowBottom: 0.6,
-  windowTop: 9.6,
-} as const;
-
 export const CORRIDOR = {
   minX: -110,
   maxX: 150,
@@ -68,8 +51,99 @@ export interface CityOptions {
 
 export function shorelineZ(x: number): number {
   return (
-    660 + 170 * Math.sin(x * 0.00105 + 0.6) + 55 * Math.sin(x * 0.0047 + 1.3)
+    -1950 + 240 * Math.sin(x * 0.0009 + 0.4) + 70 * Math.sin(x * 0.004 + 1.1)
   );
+}
+
+export interface ExpresswayPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface Expressway {
+  width: number;
+  points: readonly ExpresswayPoint[];
+}
+
+export const EXPRESSWAYS: readonly Expressway[] = [
+  {
+    width: 18,
+    points: [
+      { x: -2700, y: 15, z: -230 },
+      { x: -1500, y: 15, z: -330 },
+      { x: -700, y: 17, z: -190 },
+      { x: -150, y: 18, z: -150 },
+      { x: 420, y: 18, z: -300 },
+      { x: 1100, y: 16, z: -620 },
+      { x: 2600, y: 15, z: -980 },
+    ],
+  },
+  {
+    width: 16,
+    points: [
+      { x: -1000, y: 13, z: 1700 },
+      { x: -820, y: 13, z: 900 },
+      { x: -690, y: 15, z: 250 },
+      { x: -520, y: 16, z: -500 },
+      { x: -380, y: 15, z: -1200 },
+      { x: -300, y: 22, z: -1750 },
+      { x: -150, y: 34, z: -2300 },
+    ],
+  },
+];
+
+function catmullRom(a: number, b: number, c: number, d: number, t: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (
+    0.5 *
+    (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3)
+  );
+}
+
+export function sampleExpressway(road: Expressway, steps: number): ExpresswayPoint[] {
+  const points = road.points;
+  const count = Math.max(1, Math.floor(steps));
+  const segments = points.length - 1;
+  const samples: ExpresswayPoint[] = [];
+  for (let index = 0; index <= count; index += 1) {
+    const u = (index / count) * segments;
+    const segment = Math.min(segments - 1, Math.floor(u));
+    const t = u - segment;
+    const p0 = points[Math.max(0, segment - 1)]!;
+    const p1 = points[segment]!;
+    const p2 = points[segment + 1]!;
+    const p3 = points[Math.min(points.length - 1, segment + 2)]!;
+    samples.push({
+      x: catmullRom(p0.x, p1.x, p2.x, p3.x, t),
+      y: catmullRom(p0.y, p1.y, p2.y, p3.y, t),
+      z: catmullRom(p0.z, p1.z, p2.z, p3.z, t),
+    });
+  }
+  return samples;
+}
+
+const EXPRESSWAY_SAMPLES = EXPRESSWAYS.map((road) => ({
+  width: road.width,
+  points: sampleExpressway(road, 240),
+}));
+
+export function expresswayDistance(x: number, z: number): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const road of EXPRESSWAY_SAMPLES) {
+    for (let index = 1; index < road.points.length; index += 1) {
+      const a = road.points[index - 1]!;
+      const b = road.points[index]!;
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const length2 = dx * dx + dz * dz;
+      const t = length2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / length2)) : 0;
+      const distance = Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)) - road.width / 2;
+      best = Math.min(best, distance);
+    }
+  }
+  return best;
 }
 
 function streetWidth(index: number): number {
@@ -107,10 +181,10 @@ function valueNoise(x: number, z: number): number {
 }
 
 const CLUSTERS: readonly (readonly [number, number, number, number])[] = [
-  [-950, -1450, 520, 1.0],
-  [260, -520, 380, 0.75],
-  [1300, -900, 420, 0.6],
-  [-300, -2600, 700, 0.55],
+  [-700, -820, 430, 1.0],
+  [620, -1180, 380, 0.85],
+  [-220, -420, 260, 0.55],
+  [1450, -560, 460, 0.5],
 ];
 
 function density(x: number, z: number): number {
@@ -193,14 +267,14 @@ export function buildCity(random: Random, options: CityOptions): CityLayout {
       HERO.height,
       3,
       0.5,
-      0.82,
+      0.3,
     ],
   ];
   const radius = options.radius;
   const firstX = Math.floor((-radius - STREETS.originX) / STREETS.pitchX);
   const lastX = Math.ceil((radius - STREETS.originX) / STREETS.pitchX);
-  const firstZ = Math.floor((-radius - STREETS.originZ) / STREETS.pitchZ);
-  const lastZ = Math.ceil((900 - STREETS.originZ) / STREETS.pitchZ);
+  const firstZ = Math.floor((-2700 - STREETS.originZ) / STREETS.pitchZ);
+  const lastZ = Math.ceil((1600 - STREETS.originZ) / STREETS.pitchZ);
   const lots: Lot[] = [];
   for (let ix = firstX; ix < lastX; ix += 1) {
     const left = STREETS.originX + ix * STREETS.pitchX + streetWidth(ix) / 2;
@@ -212,7 +286,7 @@ export function buildCity(random: Random, options: CityOptions): CityLayout {
         STREETS.originZ + (iz + 1) * STREETS.pitchZ - streetWidth(iz + 1) / 2;
       const centreX = (left + right) / 2;
       const centreZ = (top + bottom) / 2;
-      if (Math.hypot(centreX, centreZ) > radius) {
+      if (Math.hypot(centreX, centreZ * 0.8) > radius) {
         continue;
       }
       lots.length = 0;
@@ -237,7 +311,10 @@ export function buildCity(random: Random, options: CityOptions): CityLayout {
         }
         const x = (minX + maxX) / 2;
         const z = (minZ + maxZ) / 2;
-        if (maxZ > shorelineZ(x) - 14 || maxZ > shorelineZ(minX) - 14 || maxZ > shorelineZ(maxX) - 14) {
+        if (minZ < shorelineZ(x) + 14 || minZ < shorelineZ(minX) + 14 || minZ < shorelineZ(maxX) + 14) {
+          continue;
+        }
+        if (expresswayDistance(x, z) < Math.hypot(width, depth) / 2 + 4) {
           continue;
         }
         const corridor = inCorridor({ minX, maxX, minZ, maxZ });
@@ -250,8 +327,14 @@ export function buildCity(random: Random, options: CityOptions): CityLayout {
         }
         const tall = height > 45;
         const style = height < 9 && random() < 0.4 ? 2 : tall || random() < 0.45 ? 0 : 1;
-        const lit =
-          style === 2 ? 0.04 + 0.08 * random() : 0.22 + 0.5 * random();
+        const dark = random() < 0.16;
+        const lit = dark
+          ? 0.01 + 0.03 * random()
+          : style === 2
+            ? 0.03 + 0.07 * random()
+            : style === 0
+              ? 0.07 + 0.3 * Math.pow(random(), 1.6)
+              : 0.06 + 0.2 * random();
         rows.push([x, z, width, depth, height, style, random(), lit]);
       }
     }
@@ -265,4 +348,30 @@ export function buildCity(random: Random, options: CityOptions): CityLayout {
     data.set(row, index * BUILDING_STRIDE);
   });
   return { count: kept.length, data };
+}
+
+export interface BeaconLayout {
+  count: number;
+  data: Float32Array;
+}
+
+export function aviationBeacons(layout: CityLayout): BeaconLayout {
+  const rows: number[] = [];
+  for (let index = 1; index < layout.count; index += 1) {
+    const base = index * BUILDING_STRIDE;
+    const height = layout.data[base + 4]!;
+    if (height < 72) {
+      continue;
+    }
+    const x = layout.data[base]!;
+    const z = layout.data[base + 1]!;
+    const width = layout.data[base + 2]!;
+    const depth = layout.data[base + 3]!;
+    const seed = layout.data[base + 6]!;
+    rows.push(x - width * 0.4, height + 1.2, z - depth * 0.4, seed);
+    if (height > 120) {
+      rows.push(x + width * 0.4, height + 1.2, z + depth * 0.4, seed + 0.5);
+    }
+  }
+  return { count: rows.length / 4, data: new Float32Array(rows) };
 }

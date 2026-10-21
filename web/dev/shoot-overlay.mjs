@@ -21,7 +21,14 @@ const states = [
   "confirm",
   "full-unavailable",
   "nano-only",
+  "intro",
+  "folder-scan",
+  "folder-ready",
+  "folder-empty",
+  "place",
 ];
+const extra = process.env.OVERLAY_QUERY ?? "";
+const settle = { "folder-scan": 3600, "folder-ready": 900, "folder-empty": 900, intro: 2000 };
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
@@ -37,6 +44,8 @@ for (const viewport of viewports) {
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: 1,
     locale: "ja-JP",
+    hasTouch: viewport.name === "mobile",
+    isMobile: viewport.name === "mobile",
   });
   const page = await context.newPage();
   page.on("console", (message) => {
@@ -51,12 +60,12 @@ for (const viewport of viewports) {
     if (only && !only.includes(state)) {
       continue;
     }
-    await page.goto(`${origin}/dev/overlay.html?state=${state}`);
+    await page.goto(`${origin}/dev/overlay.html?state=${state}${extra}`);
     await page.waitForFunction(
       () => document.documentElement.dataset.harnessReady === "true",
     );
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(settle[state] ?? 1800);
     const path = `${output}/${round}-${viewport.name}-${state}.png`;
     await page.screenshot({ path });
     console.log(path);

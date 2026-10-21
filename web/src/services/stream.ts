@@ -44,8 +44,9 @@ export interface StreamDeps {
 
 export const OFFLINE_NOTICE =
   "Wikimedia Commons に接続できませんでした。自分の写真は並べられます。";
-export const DESK_FULL_NOTICE =
-  "机がいっぱいなので、これ以上は並べられません。";
+export function deskFullNotice(leftOut: number): string {
+  return `机がいっぱいなので、${leftOut.toLocaleString("ja-JP")}枚は並べられませんでした。`;
+}
 
 const OFFLINE_AFTER_FAILURES = 8;
 const OFFLINE_PROBE_MS = 5_000;
@@ -53,6 +54,7 @@ const IDLE_POLL_MS = 250;
 const DECISION_BEAT_MS = 280;
 const RELEASE_FOCUS_MS = 1_500;
 const USER_RESERVE = 64;
+const FOCUS_DROP_LIMIT = 3;
 const MIN_RATE_PAUSE_MS = 1_000;
 const MAX_RATE_PAUSE_MS = 60_000;
 const NO_SLOT = "並べる場所が決まりませんでした";
@@ -64,12 +66,14 @@ interface Pending {
   simulated: Quarter;
   order: number;
   added: boolean;
+  focus: boolean;
 }
 
 interface Landed {
   source: PhotoSource;
   blob: Blob;
   simulated: Quarter;
+  focus: boolean;
 }
 
 function messageOf(error: unknown): string {
@@ -87,7 +91,7 @@ export function createStream(deps: StreamDeps): Stream {
     0,
     Math.max(0, Math.min(deps.sources.length, limits.maxPrints - reserve)),
   );
-  const plannedSources = remaining.length;
+  let plannedSources = remaining.length;
   const takenIds = new Set(deps.sources.map((source) => source.id));
   const userQueue: Pending[] = [];
   const retryQueue: Pending[] = [];
@@ -130,14 +134,31 @@ export function createStream(deps: StreamDeps): Stream {
     return pickSimulated(deps.random);
   }
 
-  function pending(source: PhotoSource): Pending {
+  function pending(source: PhotoSource, focus = false): Pending {
     pendingOrder += 1;
     return {
       source,
       simulated: simulatedFor(source),
       order: pendingOrder,
       added: false,
+      focus,
     };
+  }
+
+  function dropUnstartedCommons(count: number): number {
+    let dropped = 0;
+    for (
+      let index = remaining.length - 1;
+      index >= 0 && dropped < count;
+      index -= 1
+    ) {
+      if (remaining[index]!.kind === "commons") {
+        remaining.splice(index, 1);
+        dropped += 1;
+      }
+    }
+    plannedSources -= dropped;
+    return dropped;
   }
 
   function quietly(action: () => void): void {
@@ -335,7 +356,7 @@ export function createStream(deps: StreamDeps): Stream {
   }
 
   async function runLoad(entry: Pending): Promise<void> {
-    const { source, simulated } = entry;
+    const { source, simulated, focus } = entry;
     const controller = new AbortController();
     controllers.add(controller);
     let image: LoadedImage;
@@ -396,15 +417,20 @@ export function createStream(deps: StreamDeps): Stream {
     landing -= 1;
     landedCount += 1;
     store.dispatch({ type: "landed", id: source.id });
-    if (isUser(source)) {
+    if (focus) {
       focused = source.id;
       quietly(() => scene.focus(source.id));
     }
-    waiting.push({ source, blob: image.blob, simulated });
+    waiting.push({ source, blob: image.blob, simulated, focus });
     pump();
   }
 
-  async function runScan({ source, blob, simulated }: Landed): Promise<void> {
+  async function runScan({
+    source,
+    blob,
+    simulated,
+    focus,
+  }: Landed): Promise<void> {
     const id = source.id;
     scanning += 1;
     store.dispatch({ type: "scanStarted", id });
@@ -454,7 +480,7 @@ export function createStream(deps: StreamDeps): Stream {
     active -= 1;
     store.dispatch({ type: "placed", id });
     pump();
-    if (isUser(source)) {
+    if (focus) {
       await deps.wait(RELEASE_FOCUS_MS);
       if (!disposed) {
         releaseFocus(id);
@@ -578,17 +604,26 @@ export function createStream(deps: StreamDeps): Stream {
       if (disposed || files.length === 0) {
         return;
       }
-      const room = Math.max(
+      const free = Math.max(
         0,
         limits.maxPrints - plannedSources - userAccepted,
       );
-      const accepted = files.slice(0, room);
+      const dropped =
+        files.length > free ? dropUnstartedCommons(files.length - free) : 0;
+      const accepted = files.slice(0, free + dropped);
+      const focusEach = files.length <= FOCUS_DROP_LIMIT;
+      if (!focusEach && focused !== null) {
+        focused = null;
+        quietly(() => scene.focus(null));
+      }
       for (const file of accepted) {
-        userQueue.push(pending(deps.makeUserSource(file, nextUserId())));
+        userQueue.push(
+          pending(deps.makeUserSource(file, nextUserId()), focusEach),
+        );
       }
       userAccepted += accepted.length;
       if (accepted.length < files.length) {
-        deps.onNotice(DESK_FULL_NOTICE);
+        deps.onNotice(deskFullNotice(files.length - accepted.length));
       }
       if (accepted.length > 0) {
         store.dispatch({ type: "totalChanged", total: total() });

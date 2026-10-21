@@ -9,6 +9,9 @@ import type {
 } from "../contracts";
 import {
   creditText,
+  folderProgressText,
+  folderScanText,
+  folderTruncatedText,
   headlineChange,
   headlineState,
   judgementText,
@@ -17,6 +20,7 @@ import {
   modelOptionText,
   modelStateText,
   modelSwitch,
+  photoPlace,
   progressAnnouncement,
   switchConfirmText,
   verdictOf,
@@ -474,5 +478,81 @@ describe("modelLoadingNote", () => {
     expect(
       modelLoadingNote({ loaded: 551_055_739, total: 551_055_739, ready: true }),
     ).toBe("");
+  });
+});
+
+describe("photoPlace", () => {
+  it("names the country where a Commons photo was taken", () => {
+    expect(
+      photoPlace(source({ location: { lat: -1.29, lon: 36.82, country: "KE" } })),
+    ).toBe("ケニア");
+  });
+
+  it("falls back to coordinates without a country", () => {
+    expect(
+      photoPlace(source({ location: { lat: 35.68, lon: 139.77, country: null } })),
+    ).toBe("北緯 35.68° 東経 139.77°");
+  });
+
+  it("is empty when the place is unknown", () => {
+    expect(photoPlace(source({ location: null }))).toBeNull();
+    expect(photoPlace(source())).toBeNull();
+  });
+
+  it("never shows a place for visitors' photos", () => {
+    expect(
+      photoPlace(
+        source({
+          kind: "user",
+          attribution: null,
+          location: { lat: 35.68, lon: 139.77, country: "JP" },
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("folderScanText", () => {
+  it("counts the photos found so far", () => {
+    expect(folderScanText(0)).toBe("フォルダを読み込み中");
+    expect(folderScanText(340)).toBe("フォルダを読み込み中 340枚");
+    expect(folderScanText(1284)).toBe("フォルダを読み込み中 1,284枚");
+  });
+});
+
+describe("folderProgressText", () => {
+  it("says how many photos will be lined up and how many files are left out", () => {
+    expect(
+      folderProgressText({ found: 1159, accepted: 740, skipped: 419, done: false }),
+    ).toBe("740枚を並べます（動画など 419件は対象外）");
+  });
+
+  it("omits the left-out part when every file is a photo", () => {
+    expect(
+      folderProgressText({ found: 12, accepted: 12, skipped: 0, done: false }),
+    ).toBe("12枚を並べます");
+  });
+
+  it("explains when nothing can be lined up", () => {
+    expect(
+      folderProgressText({ found: 3, accepted: 0, skipped: 3, done: false }),
+    ).toBe("並べられる写真がありませんでした（動画など 3件は対象外）");
+    expect(
+      folderProgressText({ found: 0, accepted: 0, skipped: 0, done: true }),
+    ).toBe("写真が見つかりませんでした");
+  });
+
+  it("formats large numbers with separators", () => {
+    expect(
+      folderProgressText({ found: 4000, accepted: 2512, skipped: 1488, done: false }),
+    ).toBe("2,512枚を並べます（動画など 1,488件は対象外）");
+  });
+});
+
+describe("folderTruncatedText", () => {
+  it("states the cap that was applied", () => {
+    expect(folderTruncatedText(20000)).toBe(
+      "フォルダの中のファイルが多いため、最初の 20,000件だけ読み込みました。",
+    );
   });
 });

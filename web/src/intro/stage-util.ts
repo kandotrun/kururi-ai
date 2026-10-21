@@ -43,7 +43,7 @@ export function ribbonGeometry(segments: number): InstancedBufferGeometry {
   const indices: number[] = [];
   for (let index = 0; index < segments; index += 1) {
     const a = index * 2;
-    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
   }
   geometry.setAttribute(
     "position",

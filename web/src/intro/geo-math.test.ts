@@ -113,6 +113,12 @@ describe("great circles", () => {
     expect(arcLift(Math.PI)).toBeGreaterThan(arcLift(0.3));
     expect(arcLift(Math.PI)).toBeLessThan(0.4);
   });
+
+  it("raises a Europe to Tokyo arc well above the surface", () => {
+    const angle = angularDistance(paris, TOKYO);
+    expect(arcLift(angle)).toBeGreaterThan(0.14);
+    expect(arcLift(angle)).toBeLessThan(0.25);
+  });
 });
 
 describe("localFrame", () => {

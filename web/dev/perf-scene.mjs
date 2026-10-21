@@ -6,17 +6,17 @@ const width = Number(process.argv[3] ?? 1440);
 const height = Number(process.argv[4] ?? 900);
 
 const launchArgs =
-  process.env.SCENE_GPU === "1"
-    ? ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist"]
-    : ["--enable-unsafe-swiftshader"];
-const browser = await chromium.launch({ args: launchArgs });
+  process.env.SCENE_GPU === "0"
+    ? ["--enable-unsafe-swiftshader"]
+    : ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-angle=metal"];
+const browser = await chromium.launch({ headless: true, args: launchArgs });
 const page = await browser.newPage({
   viewport: { width, height },
   deviceScaleFactor: Number(process.env.SCENE_DPR ?? 1),
 });
 const started = Date.now();
 await page.goto(
-  `${base}?n=${count}&rate=160&pile=64&loading=48&workers=64&infer=40&seed=13`,
+  `${base}?insets=ui&n=${count}&rate=160&pile=64&loading=48&workers=64&infer=40&seed=13`,
 );
 const progress = setInterval(async () => {
   const placed = await page
@@ -46,7 +46,11 @@ console.log(
   `filled ${count} prints in ${((Date.now() - started) / 1000).toFixed(1)} s`,
 );
 await page.waitForTimeout(12000);
-const idle = await page.evaluate(() => window.__harness.measure(2));
+const idle = await page.evaluate(async () => {
+  const before = window.__harness.stats().frames;
+  const report = await window.__harness.measure(2);
+  return { ...report, sceneFrames: window.__harness.stats().frames - before };
+});
 console.log("idle (no rendering expected)", JSON.stringify(idle));
 const dolly = await page.evaluate(async () => {
   const h = window.__harness;

@@ -46,35 +46,38 @@ export function planArcs(
   const arrivals = new Float32Array(count);
   const vector: [number, number, number] = [0, 0, 0];
   const arrivalSpan = GATHER.arrivalEnd - GATHER.arrivalStart;
+  const lightSpan = GATHER.lightEnd - GATHER.lightStart;
   for (let index = 0; index < count; index += 1) {
     const origin = awayFromAntipode(chosen[index]!, target);
     const angle = angularDistance(origin, target);
     const reach = angle / Math.PI;
-    const travel = 0.55 + 0.85 * reach;
-    let arrival =
-      GATHER.arrivalStart + arrivalSpan * Math.pow(options.random(), 0.7);
-    let launch = arrival - travel;
-    if (launch < GATHER.launchStart) {
-      launch = GATHER.launchStart + 0.18 * options.random();
-      arrival = Math.min(GATHER.arrivalEnd, launch + travel);
-      launch = arrival - travel;
-    }
-    const lead = 0.2 + 0.4 * options.random();
-    const light = Math.min(
-      launch,
-      Math.max(GATHER.lightStart + 0.25 * options.random(), launch - lead),
+    const travel = 0.9 + 1.1 * Math.sqrt(reach) * (0.9 + 0.2 * options.random());
+    const arrival =
+      GATHER.arrivalStart + arrivalSpan * Math.pow(options.random(), 0.62);
+    const launch = Math.max(
+      GATHER.launchStart + 0.25 * options.random(),
+      arrival - travel,
     );
+    const lead = 0.12 + 0.5 * options.random();
+    const light = Math.max(
+      GATHER.lightStart,
+      Math.min(
+        launch - lead,
+        GATHER.lightStart + lightSpan * Math.pow(options.random(), 1.3),
+      ),
+    );
+    const flight = Math.min(travel, GATHER.arrivalEnd - launch);
     latLonToVec3(origin, vector);
     const base = index * ARC_STRIDE;
     data[base] = vector[0];
     data[base + 1] = vector[1];
     data[base + 2] = vector[2];
-    data[base + 3] = Math.max(GATHER.lightStart, light);
+    data[base + 3] = Math.min(light, launch - 0.12);
     data[base + 4] = launch;
-    data[base + 5] = travel;
+    data[base + 5] = flight;
     data[base + 6] = arcLift(angle) * (0.85 + 0.3 * options.random());
     data[base + 7] = options.random();
-    arrivals[index] = launch + travel;
+    arrivals[index] = launch + flight;
   }
   arrivals.sort();
   return { count, data, arrivals };

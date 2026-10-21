@@ -20,7 +20,15 @@ describe("readAppConfig", () => {
       lowPower: false,
       workers: null,
       model: "nano",
+      intro: true,
     });
+  });
+
+  it("skips the intro when asked or when motion should be reduced", () => {
+    expect(readAppConfig("?intro=off", desktop).intro).toBe(false);
+    expect(readAppConfig("?motion=reduce", desktop).intro).toBe(false);
+    expect(readAppConfig("", { ...desktop, prefersReducedMotion: true }).intro).toBe(false);
+    expect(readAppConfig("?intro=on", desktop).intro).toBe(true);
   });
 
   it("selects the full model only when asked by name", () => {
@@ -39,6 +47,7 @@ describe("readAppConfig", () => {
       lowPower: false,
       workers: 2,
       model: "nano",
+      intro: false,
     });
   });
 

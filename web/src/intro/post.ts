@@ -112,25 +112,27 @@ ${TONE_GLSL}
 
 vec4 flyClouds(vec2 uv) {
   float aspect = uResolution.x / max(uResolution.y, 1.0);
-  vec2 centred = (uv - vec2(0.5, 0.48)) * vec2(aspect, 1.0);
+  vec2 centred = (uv - vec2(0.5, 0.46)) * vec2(aspect, 1.0);
   vec3 color = vec3(0.0);
   float alpha = 0.0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     float layer = float(i);
-    float z = fract(uCloudTime * 0.85 + layer * 0.25);
-    float scale = mix(2.6, 0.3, z * z);
+    float z = fract(uCloudTime * 0.95 + layer * 0.2);
+    float scale = mix(3.4, 0.22, z * z);
     vec2 q = centred * scale + vec2(layer * 3.7, layer * 1.9);
-    float n = fbm(q * 2.1 + vec2(0.0, uCloudTime * 0.04));
-    float density = smoothstep(0.36, 0.76, n);
-    float life = sin(3.14159265 * z);
-    float a = density * life * 0.82;
-    vec3 tops = mix(vec3(0.024, 0.036, 0.04), vec3(0.085, 0.095, 0.095), smoothstep(0.5, 0.95, n));
-    vec3 under = vec3(0.2, 0.12, 0.06) * (1.0 - uv.y) * (1.0 - smoothstep(0.42, 0.85, n));
-    color += (tops + under) * a * (1.0 - alpha);
+    float n = fbm(q * 1.5 + vec2(layer * 0.7, uCloudTime * 0.05));
+    float shape = smoothstep(0.4, 0.64, n);
+    float life = smoothstep(0.0, 0.3, z) * (1.0 - smoothstep(0.82, 1.0, z));
+    float a = shape * life * 0.92;
+    float thickness = smoothstep(0.48, 0.86, n);
+    vec3 cool = vec3(0.028, 0.037, 0.046);
+    vec3 warm = vec3(0.11, 0.092, 0.078) * (0.35 + 0.65 * (1.0 - uv.y));
+    vec3 tint = mix(warm, cool, thickness) * (0.8 + 0.4 * z);
+    color += tint * a * (1.0 - alpha);
     alpha += a * (1.0 - alpha);
   }
-  vec3 fill = vec3(0.032, 0.042, 0.045) + vec3(0.12, 0.075, 0.04) * (1.0 - uv.y);
-  float cover = smoothstep(0.6, 0.97, uClouds);
+  vec3 fill = mix(vec3(0.075, 0.064, 0.056), vec3(0.026, 0.034, 0.04), smoothstep(0.0, 0.9, uv.y));
+  float cover = smoothstep(0.86, 0.985, uClouds);
   vec3 resolved = alpha > 1e-3 ? color / alpha : fill;
   vec3 mixed = mix(fill, resolved, alpha);
   return vec4(mixed, max(alpha * uClouds, cover));
@@ -156,8 +158,9 @@ void main() {
   if (uGlow > 0.001) {
     float aspect = uResolution.x / max(uResolution.y, 1.0);
     float r = length((vUv - 0.5) * vec2(aspect, 1.0));
-    vec3 warm = vec3(1.25, 0.98, 0.72) * (1.0 + 0.5 * (1.0 - smoothstep(0.0, 0.8, r)));
-    color = mix(color, warm, uGlow * (0.8 + 0.2 * (1.0 - smoothstep(0.0, 0.9, r))));
+    float centre = 1.0 - smoothstep(0.0, 0.85, r);
+    vec3 warm = mix(vec3(0.36, 0.22, 0.12), vec3(0.9, 0.64, 0.38), centre);
+    color = mix(color, warm, uGlow * (0.86 + 0.14 * centre));
   }
   color *= uExposure * uIntro;
   color *= vignette(gl_FragCoord.xy);

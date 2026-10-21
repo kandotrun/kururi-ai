@@ -9,47 +9,47 @@ export type IntroPhase =
   | "handoff"
   | "done";
 
-export const INTRO_DURATION_MS = 9600;
+export const INTRO_DURATION_MS = 10000;
 export const INTRO_SECONDS = INTRO_DURATION_MS / 1000;
-export const HANDOFF_START = 9.0;
+export const HANDOFF_START = 9.4;
 export const SKIP_FADE_SECONDS = 0.36;
 
 export const PHASE_STARTS: readonly (readonly [IntroPhase, number])[] = [
   ["space", 0],
-  ["gather", 1.0],
-  ["descent", 3.2],
-  ["city", 5.4],
-  ["room", 7.2],
+  ["gather", 0.9],
+  ["descent", 3.9],
+  ["city", 5.9],
+  ["room", 7.7],
   ["handoff", HANDOFF_START],
   ["done", INTRO_SECONDS],
 ];
 
 export const GATHER = {
-  lightStart: 1.0,
-  lightEnd: 2.3,
-  launchStart: 1.25,
-  arrivalStart: 2.25,
-  arrivalEnd: 3.65,
+  lightStart: 0.75,
+  lightEnd: 2.1,
+  launchStart: 1.1,
+  arrivalStart: 2.15,
+  arrivalEnd: 3.85,
 } as const;
 
 export const CLOUD_PASS = {
-  riseStart: 4.92,
-  riseEnd: 5.4,
-  fallStart: 5.7,
-  fallEnd: 6.22,
+  riseStart: 5.46,
+  riseEnd: 5.9,
+  fallStart: 6.1,
+  fallEnd: 6.52,
   peak: 0.97,
 } as const;
 
 export const WINDOW_PASS = {
-  riseStart: 7.04,
-  riseEnd: 7.3,
-  fallStart: 7.44,
-  fallEnd: 7.9,
-  peak: 0.96,
+  riseStart: 7.56,
+  riseEnd: 7.77,
+  fallStart: 7.89,
+  fallEnd: 8.06,
+  peak: 0.94,
 } as const;
 
-export const CITY_IN: readonly [number, number] = [5.47, 5.63];
-export const ROOM_IN: readonly [number, number] = [7.33, 7.41];
+export const CITY_IN: readonly [number, number] = [5.93, 6.09];
+export const ROOM_IN: readonly [number, number] = [7.79, 7.87];
 
 export function phaseAt(time: number): IntroPhase {
   let current: IntroPhase = "space";
@@ -121,6 +121,6 @@ export function stageMix(time: number, out: StageMix): StageMix {
     );
   out.fade = 1 - smoothstep(HANDOFF_START, INTRO_SECONDS, time);
   out.intro = smoothstep(0, 0.7, time);
-  out.exposure = 1 + 0.5 * room * (1 - smoothstep(7.4, 8.2, time));
+  out.exposure = 1 + 0.18 * room * (1 - smoothstep(7.9, 8.4, time));
   return out;
 }

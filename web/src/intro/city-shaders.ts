@@ -1,4 +1,5 @@
 import { FILTER_GLSL, NOISE_GLSL } from "./glsl";
+import { CARD_PALETTE_GLSL } from "./globe-shaders";
 
 export const CITY_COMMON_GLSL = `
 uniform vec3 uZenith;
@@ -22,7 +23,7 @@ vec3 applyFog(vec3 color, vec3 world) {
   vec3 dir = d / max(dist, 1e-3);
   float lowAir = exp(-max(min(world.y, cameraPosition.y), 0.0) / 900.0);
   float fog = 1.0 - exp(-dist * uFogDensity * (0.55 + 0.75 * lowAir));
-  vec3 haze = skyColor(vec3(dir.x, max(dir.y, 0.0) * 0.25, dir.z));
+  vec3 haze = skyColor(vec3(dir.x, max(dir.y, 0.0) * 0.25, dir.z)) + vec3(0.014, 0.0125, 0.011) * lowAir;
   return mix(color, haze, fog);
 }
 
@@ -78,7 +79,7 @@ uniform float uLightGain;
 varying vec3 vWorld;
 
 float shoreZ(float x) {
-  return 660.0 + 170.0 * sin(x * 0.00105 + 0.6) + 55.0 * sin(x * 0.0047 + 1.3);
+  return -1950.0 + 240.0 * sin(x * 0.0009 + 0.4) + 70.0 * sin(x * 0.004 + 1.1);
 }
 
 vec3 streetLight(float coord, float pitch, float origin, float along, float fwAcross, float fwAlong, float axis, out float road) {
@@ -96,7 +97,7 @@ vec3 streetLight(float coord, float pitch, float origin, float along, float fwAc
   vec3 color = mix(vec3(1.0, 0.58, 0.26), vec3(1.0, 0.84, 0.64), avenue);
   color = mix(color, vec3(0.8, 0.9, 1.0), step(0.8, hash12(vec2(index, axis + 3.0))) * (1.0 - avenue));
   float spill = exp(-pow(abs(d) / (halfWidth + 9.0), 2.0));
-  vec3 light = color * gain * (rows * dots * 30.0 + spill * 0.05 + road * 0.02);
+  vec3 light = color * gain * (rows * dots * 8.0 + spill * 0.08 + road * 0.025);
   float lane = bandAA(abs(d) - halfWidth * 0.42, 0.4, fwAcross) * avenue;
   float heading = d > 0.0 ? 1.0 : -1.0;
   float cars = filteredPulse((along + heading * uTime * 14.0) / 17.0 + index * 0.37, 0.0, 0.1, fwAlong / 17.0);
@@ -123,7 +124,7 @@ void main() {
   float fwx = max(fwidth(p.x), 1e-3);
   float fwz = max(fwidth(p.y), 1e-3);
   float shore = shoreZ(p.x);
-  float sea = smoothstep(-3.0, 3.0, p.y - shore);
+  float sea = smoothstep(3.0, -3.0, p.y - shore);
   float density = district(p);
   float roadX;
   float roadZ;
@@ -141,9 +142,12 @@ void main() {
   vec3 reflected = reflect(view, vec3(0.0, 1.0, 0.0));
   float fresnel = 0.02 + 0.98 * pow(1.0 - max(-view.y, 0.0), 5.0);
   vec3 water = skyColor(reflected) * fresnel + vec3(0.0015, 0.0032, 0.0038);
-  float nearShore = exp(-max(p.y - shore, 0.0) / 160.0);
+  float nearShore = exp(-max(shore - p.y, 0.0) / 160.0);
   float ripple = valueNoise(vec2(p.x * 0.05, p.y * 0.45 + uTime * 0.4));
-  water += vec3(1.0, 0.68, 0.38) * nearShore * ripple * ripple * 0.06;
+  water += vec3(1.0, 0.68, 0.38) * nearShore * ripple * ripple * 0.08;
+  float quay = exp(-pow((p.y - shore - 18.0) / 10.0, 2.0));
+  float quayLights = filteredPulse(p.x / 24.0 + hash12(vec2(floor(p.x / 240.0), 2.0)), 0.45, 0.55, fwx / 24.0);
+  land += vec3(1.0, 0.78, 0.5) * quay * (quayLights * 6.0 + 0.04);
   vec3 color = mix(land, water, sea);
   gl_FragColor = vec4(applyFog(color, vWorld), 1.0);
 }
@@ -229,9 +233,15 @@ void main() {
     vec3 cool = vec3(0.76, 0.87, 1.0);
     vec3 windowColor = office > 0.5 ? mix(neutral, cool, step(0.5, tint)) : mix(warm, neutral, step(0.72, tint));
     vec3 average = office > 0.5 ? mix(neutral, cool, 0.5) : mix(warm, neutral, 0.28);
-    float bright = mix(0.5, 1.3, hash13(vec3(id, seed + 3.1)));
+    float shade = hash13(vec3(id, seed + 3.1));
+    float bright = mix(0.28, 1.1, shade * shade);
     float detail = 1.0 - smoothstep(0.3, 0.85, max(fw.x, fw.y));
-    vec3 emission = mix(average * probability * 0.9, windowColor * lit * bright, detail) * uWindowGain;
+    vec2 inner = vec2((fract(cell.x) - x0) / (1.0 - 2.0 * x0), (fract(cell.y) - y0) / (y1 - y0));
+    float ceiling = 0.55 + 0.6 * smoothstep(0.35, 1.0, inner.y);
+    float furniture = 1.0 - 0.45 * (1.0 - smoothstep(0.16, 0.3, inner.y)) * step(0.4, hash13(vec3(id, seed + 8.0)));
+    float blinds = 1.0 - 0.55 * step(0.72, hash13(vec3(id, seed + 5.0))) * step(0.5, fract(inner.y * 7.0));
+    float interior = mix(1.0, ceiling * furniture * blinds, smoothstep(0.6, 0.15, max(fw.x, fw.y)));
+    vec3 emission = mix(average * probability * 0.9, windowColor * lit * bright * interior, detail) * uWindowGain;
     vec3 glass = vec3(0.005, 0.0075, 0.0095);
     vec3 wall = mix(vec3(0.010, 0.012, 0.013), vec3(0.015, 0.016, 0.015), hash12(vec2(seed, 2.0)));
     wall += vec3(0.05, 0.034, 0.02) * exp(-v / 10.0) * 0.5;
@@ -247,9 +257,11 @@ void main() {
       float inside = inX * inY;
       float transom = 1.0 - (1.0 - smoothstep(0.03, 0.03 + fwl.y, abs(local.y - 0.55))) * 0.85;
       float border = smoothstep(halfSize.x - 0.1, halfSize.x - 0.1 + fwl.x, abs(local.x)) + smoothstep(halfSize.y - 0.1, halfSize.y - 0.1 + fwl.y, abs(local.y));
-      vec2 lampOffset = local - vec2(-0.3, -0.5);
-      float lamp = exp(-dot(lampOffset, lampOffset) * 1.6);
-      vec3 room = vec3(1.0, 0.8, 0.56) * (0.65 + 0.35 * smoothstep(-1.1, 1.1, local.y) + 1.2 * lamp);
+      vec2 lampOffset = (local - vec2(-0.35, 0.05)) * vec2(1.0, 1.3);
+      float lamp = exp(-dot(lampOffset, lampOffset) * 5.0);
+      float pool = exp(-pow((local.y + 0.42) / 0.28, 2.0)) * exp(-pow(local.x / 0.9, 2.0));
+      float desk = 1.0 - 0.6 * smoothstep(-0.62, -0.7, local.y);
+      vec3 room = vec3(1.0, 0.66, 0.38) * (0.14 + 0.12 * smoothstep(1.1, -0.6, local.y)) * desk + vec3(0.42, 0.66, 0.52) * pool * 0.3 + vec3(1.0, 0.8, 0.54) * lamp * 1.1;
       vec3 heroWindow = room * uHeroGlow * transom * (1.0 - 0.9 * clamp(border, 0.0, 1.0));
       color = mix(color, heroWindow, inside);
     }
@@ -258,43 +270,57 @@ void main() {
 }
 `;
 
-export const STREAM_VERTEX = `
-attribute float aS;
-attribute float aSide;
+const STREAM_GLSL = `
 attribute vec4 aP0;
 attribute vec4 aP1;
 attribute vec4 aP2;
 uniform vec3 uEnd;
 uniform float uTime;
 uniform vec2 uViewport;
-uniform float uWidth;
-uniform float uTail;
-
-varying float vK;
-varying float vSide;
-varying float vHead;
-varying float vSeed;
 
 vec3 bezier(float t) {
   float u = 1.0 - t;
   return u * u * u * aP0.xyz + 3.0 * u * u * t * aP1.xyz + 3.0 * u * t * t * aP2.xyz + t * t * t * uEnd;
 }
 
+float streamProgress() {
+  return (uTime - aP0.w) / max(aP1.w, 1e-3);
+}
+
+float streamHead(float progress) {
+  float p = clamp(progress, 0.0, 1.0);
+  return p * p * (3.0 - 2.0 * p);
+}
+
 vec2 toScreen(vec4 clip) {
   return clip.xy / max(clip.w, 1e-6) * uViewport;
 }
+`;
+
+export const STREAM_VERTEX = `
+attribute float aS;
+attribute float aSide;
+uniform float uWidth;
+uniform float uTail;
+
+varying float vK;
+varying float vSide;
+varying float vSeed;
+varying float vLife;
+
+${STREAM_GLSL}
 
 void main() {
-  float cycle = fract(uTime * aP1.w + aP0.w);
-  float head = cycle * (1.0 + uTail);
+  float progress = streamProgress();
+  float head = streamHead(progress) * (1.0 + uTail);
   float from = clamp(head - uTail, 0.0, 1.0);
   float to = clamp(head, 0.0, 1.0);
-  float visible = step(from + 1e-4, to);
+  float visible = step(0.0, progress) * step(from + 1e-4, to);
   float s = mix(from, to, aS);
   vK = clamp((s - (head - uTail)) / uTail, 0.0, 1.0);
-  vHead = head;
   vSide = aSide;
   vSeed = aP2.w;
+  vLife = smoothstep(0.0, 0.08, progress) * (1.0 - smoothstep(0.92, 1.0, (head - uTail)));
   float ds = max(0.002, (to - from) * 0.02);
   mat4 viewProjection = projectionMatrix * viewMatrix;
   vec4 c0 = viewProjection * vec4(bezier(s), 1.0);
@@ -304,7 +330,7 @@ void main() {
   float len = length(tangent);
   vec2 dir = len > 1e-6 ? tangent / len : vec2(1.0, 0.0);
   vec2 normal = vec2(-dir.y, dir.x);
-  float width = uWidth * (0.7 + 0.8 * vK * vK);
+  float width = uWidth * (0.55 + 0.9 * vK * vK);
   c0.xy += normal * aSide * 0.5 * width * c0.w / uViewport;
   gl_Position = visible > 0.5 && c0.w > 0.0 && ca.w > 0.0 && cb.w > 0.0 ? c0 : vec4(0.0, 0.0, 2.0, 1.0);
 }
@@ -315,18 +341,67 @@ uniform float uGain;
 
 varying float vK;
 varying float vSide;
-varying float vHead;
 varying float vSeed;
+varying float vLife;
 
 void main() {
   float k = clamp(vK, 0.0, 1.0);
   float side = clamp(vSide, -1.0, 1.0);
-  float across = exp(-side * side * 4.0);
-  float trail = k * k;
-  float headGlow = smoothstep(0.86, 1.0, k) * step(vHead, 1.0) * 1.5;
-  vec3 tailColor = mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.64, 0.32), clamp(vSeed, 0.0, 1.0));
-  vec3 color = mix(tailColor, vec3(1.0, 0.9, 0.74), k * k) * (trail + headGlow) * across;
-  gl_FragColor = vec4(color * uGain, 1.0);
+  float across = exp(-side * side * 3.0);
+  float trail = k * sqrt(k) * (0.4 + 0.6 * k);
+  vec3 tailColor = mix(vec3(1.0, 0.46, 0.16), vec3(1.0, 0.6, 0.28), vSeed);
+  vec3 color = mix(tailColor, vec3(1.0, 0.86, 0.66), k * k * k) * trail * across;
+  gl_FragColor = vec4(color * uGain * vLife, 1.0);
+}
+`;
+
+export const STREAM_CARD_VERTEX = `
+attribute vec2 aCorner;
+uniform float uCardPixels;
+uniform float uCardWorld;
+uniform float uCardMax;
+uniform float uCardShare;
+uniform float uFade;
+
+varying vec2 vLocal;
+varying float vAlpha;
+varying vec3 vSky;
+varying vec3 vGround;
+varying float vHorizon;
+varying float vPixel;
+varying float vCard;
+
+${STREAM_GLSL}
+${CARD_PALETTE_GLSL}
+
+const float HALO = 2.6;
+
+void main() {
+  float progress = streamProgress();
+  float alive = step(0.0, progress) * step(progress, 1.0);
+  float s = streamHead(progress);
+  mat4 viewProjection = projectionMatrix * viewMatrix;
+  vec4 clip = viewProjection * vec4(bezier(s), 1.0);
+  vec4 ca = viewProjection * vec4(bezier(max(s - 0.01, 0.0)), 1.0);
+  vec4 cb = viewProjection * vec4(bezier(min(s + 0.01, 1.0)), 1.0);
+  vec2 tangent = toScreen(cb) - toScreen(ca);
+  float heading = length(tangent) > 1e-5 ? atan(tangent.y, tangent.x) : 0.0;
+  float seed = aP2.w;
+  float wobble = sin(uTime * (3.0 + 4.0 * seed) + seed * 40.0) * 0.4;
+  float turn = heading + (seed - 0.5) * 1.2 + wobble;
+  vCard = step(fract(seed * 11.7), uCardShare);
+  float perspective = uCardWorld * projectionMatrix[1][1] * uViewport.y / max(clip.w, 1e-3);
+  float size = clamp(perspective, uCardPixels, uCardMax) * mix(0.5, 0.8 + 0.5 * fract(seed * 7.31), vCard) * (1.0 - 0.6 * smoothstep(0.7, 1.0, progress));
+  vec2 local = aCorner * HALO;
+  vec2 offset = vec2(cos(turn) * local.x - sin(turn) * local.y, sin(turn) * local.x + cos(turn) * local.y) * size;
+  clip.xy += offset * clip.w / uViewport;
+  vLocal = local;
+  vPixel = 1.0 / max(size, 0.5);
+  vAlpha = smoothstep(0.0, 0.08, progress) * (1.0 - smoothstep(0.9, 1.0, progress)) * uFade;
+  vSky = palette(seed, 0.0);
+  vGround = palette(seed, 1.0);
+  vHorizon = (fract(seed * 3.71) - 0.5) * 0.5;
+  gl_Position = alive > 0.5 && clip.w > 0.0 && vAlpha > 0.002 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
 }
 `;
 
@@ -359,5 +434,86 @@ void main() {
   float inner = exp(-d2 * 9.0);
   float halo = exp(-d2 * 3.0) * 0.2;
   gl_FragColor = vec4(uColor * (core + inner + halo) * uIntensity, 1.0);
+}
+`;
+
+export const EXPRESSWAY_VERTEX = `
+attribute vec2 aRoad;
+varying vec2 vRoad;
+varying vec3 vWorld;
+
+void main() {
+  vRoad = aRoad;
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  gl_Position = projectionMatrix * viewMatrix * world;
+}
+`;
+
+export const EXPRESSWAY_FRAGMENT = `
+${NOISE_GLSL}
+${FILTER_GLSL}
+${CITY_COMMON_GLSL}
+varying vec2 vRoad;
+varying vec3 vWorld;
+
+float traffic(float along, float lane, float speed, float fw) {
+  float spacing = 22.0 + 10.0 * hash12(vec2(lane, 3.0));
+  float shifted = (along - uTime * speed) / spacing + hash12(vec2(lane, 7.0));
+  float car = filteredPulse(shifted, 0.0, 0.16, fw / spacing);
+  float gap = step(0.35, hash12(vec2(floor(shifted), lane)));
+  return car * gap;
+}
+
+void main() {
+  float along = vRoad.x;
+  float across = vRoad.y;
+  float fw = max(fwidth(along), 1e-3);
+  float fwy = max(fwidth(across), 1e-4);
+  vec3 color = vec3(0.01, 0.011, 0.012);
+  float laneA = bandAA(across + 0.45, 0.16, fwy);
+  float laneB = bandAA(across + 0.15, 0.16, fwy);
+  float laneC = bandAA(across - 0.15, 0.16, fwy);
+  float laneD = bandAA(across - 0.45, 0.16, fwy);
+  vec3 head = vec3(1.0, 0.95, 0.86) * 2.2;
+  vec3 tail = vec3(1.0, 0.16, 0.06) * 1.6;
+  color += head * (laneA * traffic(along, 1.0, 21.0, fw) + laneB * traffic(along, 2.0, 25.0, fw));
+  color += tail * (laneC * traffic(along, 3.0, -23.0, fw) + laneD * traffic(along, 4.0, -19.0, fw));
+  float edge = bandAA(abs(across) - 0.93, 0.05, fwy);
+  float lamps = filteredPulse(along / 32.0, 0.47, 0.53, fw / 32.0);
+  color += vec3(1.0, 0.7, 0.4) * edge * (0.08 + lamps * 3.0);
+  gl_FragColor = vec4(applyFog(color, vWorld), 1.0);
+}
+`;
+
+export const BEACON_VERTEX = `
+attribute vec2 aCorner;
+attribute vec4 aBeacon;
+uniform vec2 uViewport;
+uniform float uSize;
+uniform float uTime;
+
+varying vec2 vCorner;
+varying float vOn;
+
+void main() {
+  vCorner = aCorner;
+  float phase = fract(uTime * 0.62 + aBeacon.w * 7.0);
+  vOn = smoothstep(0.0, 0.05, phase) * (1.0 - smoothstep(0.42, 0.52, phase));
+  vec4 clip = projectionMatrix * viewMatrix * vec4(aBeacon.xyz, 1.0);
+  clip.xy += aCorner * uSize * clip.w / uViewport;
+  gl_Position = vOn > 0.01 && clip.w > 0.0 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
+}
+`;
+
+export const BEACON_FRAGMENT = `
+varying vec2 vCorner;
+varying float vOn;
+
+void main() {
+  float d2 = dot(vCorner, vCorner);
+  float core = exp(-d2 * 9.0) * 2.4;
+  float halo = exp(-d2 * 2.5) * 0.35;
+  gl_FragColor = vec4(vec3(1.0, 0.12, 0.05) * (core + halo) * vOn, 1.0);
 }
 `;

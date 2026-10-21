@@ -7,7 +7,9 @@ import {
   deskViewPose,
   fovForAspect,
 } from "./camera-path";
-import { HERO_WINDOW, ROOM } from "./city-plan";
+import { arrivalView, viewFov } from "../core/layout";
+import { HERO_WINDOW } from "./city-plan";
+import { ROOM } from "./room-plan";
 import { latLonToVec3, localFrame } from "./geo-math";
 
 const TOKYO = { lat: 35.6812, lon: 139.7671 };
@@ -64,6 +66,17 @@ describe("fovForAspect", () => {
   it("matches the desk camera field of view", () => {
     expect(fovForAspect(1.6)).toBeCloseTo(32, 9);
     expect(fovForAspect(0.3)).toBeCloseTo(41, 9);
+    for (const aspect of ASPECTS) {
+      expect(fovForAspect(aspect) * DEG).toBeCloseTo(viewFov(aspect), 12);
+    }
+  });
+});
+
+describe("defaultDeskView", () => {
+  it("is the desk scene arrival view", () => {
+    for (const aspect of ASPECTS) {
+      expect(defaultDeskView(aspect)).toEqual({ ...arrivalView(aspect) });
+    }
   });
 });
 
@@ -77,7 +90,7 @@ describe("globe camera", () => {
     const fraction = Math.tan(angular) / Math.tan((pose.fov * DEG) / 2);
     expect(fraction).toBeGreaterThan(0.42);
     expect(fraction).toBeLessThan(0.48);
-    expect(norm(pose.target)).toBeLessThan(1e-9);
+    expect(norm(pose.target)).toBeLessThan(0.12);
   });
 
   it("keeps the Earth inside a portrait frame", () => {
@@ -90,13 +103,13 @@ describe("globe camera", () => {
   });
 
   it("moves continuously", () => {
-    checkContinuity("globe", 0, 5.7);
+    checkContinuity("globe", 0, 6.2);
   });
 
   it("ends low over Tokyo looking at it obliquely from the south", () => {
     const aspect = 1.6;
     const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
-    const pose = path.globe(5.55, createCameraPose());
+    const pose = path.globe(6.0, createCameraPose());
     const tokyo = latLonToVec3(TOKYO);
     const altitude = norm(pose.position) - 1;
     expect(altitude * 6371).toBeLessThan(45);
@@ -115,8 +128,8 @@ describe("city camera", () => {
   it("starts with the same downward angle as the globe ends", () => {
     const aspect = 1.6;
     const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
-    const globe = path.globe(5.55, createCameraPose());
-    const city = path.city(5.55, createCameraPose());
+    const globe = path.globe(6.0, createCameraPose());
+    const city = path.city(6.0, createCameraPose());
     const globePitch = pitchBelowHorizon(globe, latLonToVec3(TOKYO));
     const cityPitch = pitchBelowHorizon(city, [0, 1, 0]);
     expect(Math.abs(globePitch - cityPitch)).toBeLessThan(10);
@@ -124,13 +137,13 @@ describe("city camera", () => {
   });
 
   it("moves continuously", () => {
-    checkContinuity("city", 5.4, 7.45);
+    checkContinuity("city", 5.9, 7.9);
   });
 
   it("ends right in front of the lit window, looking into it", () => {
     const aspect = 1.6;
     const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
-    const pose = path.city(7.36, createCameraPose());
+    const pose = path.city(7.82, createCameraPose());
     const window = [HERO_WINDOW.x, HERO_WINDOW.y, HERO_WINDOW.z];
     const offset = sub(pose.position, window);
     expect(norm(offset)).toBeLessThan(4);
@@ -145,15 +158,31 @@ describe("room camera", () => {
   it("enters through the window towards the desk", () => {
     const aspect = 1.6;
     const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
-    const start = path.room(7.33, createCameraPose());
-    expect(start.position[2]).toBeGreaterThan(ROOM.windowZ);
+    const start = path.room(7.79, createCameraPose());
+    expect(start.position[2]).toBeGreaterThan(ROOM.entryZ);
     expect(viewDirection(start)[2]).toBeLessThan(-0.8);
-    const inside = path.room(7.7, createCameraPose());
-    expect(inside.position[2]).toBeLessThan(ROOM.windowZ);
+    const inside = path.room(8.2, createCameraPose());
+    expect(inside.position[2]).toBeLessThan(ROOM.entryZ);
   });
 
   it("moves continuously", () => {
-    checkContinuity("room", 7.3, 9.6);
+    checkContinuity("room", 7.78, 10);
+  });
+
+  it("opens wide on the room and narrows to the desk field of view", () => {
+    for (const aspect of ASPECTS) {
+      const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
+      const desk = fovForAspect(aspect);
+      expect(path.room(8.1, createCameraPose()).fov).toBeGreaterThan(desk + 14);
+      expect(path.room(9.4, createCameraPose()).fov).toBeCloseTo(desk, 9);
+      let previous = path.room(8.4, createCameraPose()).fov;
+      for (let time = 8.4; time <= 9.4; time += 0.01) {
+        const current = path.room(time, createCameraPose()).fov;
+        expect(current).toBeLessThanOrEqual(previous + 1e-9);
+        expect(previous - current).toBeLessThan(0.6);
+        previous = current;
+      }
+    }
   });
 
   it("comes to rest on the desk camera pose for the hand-off", () => {
@@ -161,12 +190,12 @@ describe("room camera", () => {
       const view = defaultDeskView(aspect);
       const path = createCameraPath(aspect, TOKYO, view);
       const expected = deskViewPose(view, aspect, createCameraPose());
-      for (const time of [9.0, 9.3, 9.6]) {
+      for (const time of [9.4, 9.7, 10]) {
         const pose = path.room(time, createCameraPose());
         expect(norm(sub(pose.position, expected.position))).toBeLessThan(1e-6);
         expect(norm(sub(pose.target, expected.target))).toBeLessThan(1e-6);
       }
-      const before = path.room(8.98, createCameraPose());
+      const before = path.room(9.38, createCameraPose());
       expect(norm(sub(before.position, expected.position))).toBeLessThan(0.02);
       expect(pitchBelowHorizon(expected, [0, 1, 0])).toBeCloseTo(
         view.pitch / DEG,

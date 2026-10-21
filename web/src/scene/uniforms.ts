@@ -17,6 +17,7 @@ export interface SharedUniforms {
   uMatDeep: Uniform<Color>;
   uLampTint: Uniform<Color>;
   uViewport: Uniform<Vector2>;
+  uViewShift: Uniform<Vector2>;
 }
 
 export function createSharedUniforms(): SharedUniforms {
@@ -33,5 +34,6 @@ export function createSharedUniforms(): SharedUniforms {
       value: new Color().setRGB(1, 0.962, 0.895, LinearSRGBColorSpace),
     },
     uViewport: { value: new Vector2(1, 1) },
+    uViewShift: { value: new Vector2(0, 0) },
   };
 }

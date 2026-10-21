@@ -1,6 +1,8 @@
 import { readAppConfig } from "./app-config";
 import type {
   DeskScene,
+  FolderProgress,
+  GeoPoint,
   InferencePool,
   ModelId,
   ModelOption,
@@ -11,6 +13,7 @@ import type {
 } from "./contracts";
 import { decodeManifest } from "./core/manifest";
 import { modelOptions, resolveModel } from "./core/model-profiles";
+import { splitPhotoFiles } from "./core/photo-files";
 import { mulberry32 } from "./core/random";
 import {
   buildSourceQueue,
@@ -23,21 +26,36 @@ import { createStore, initialDeskState } from "./core/store";
 import { choosePool } from "./engine-choice";
 import { createFallbackScene } from "./fallback-scene";
 import { detectWebGpu, type GpuLike } from "./full/webgpu";
+import { createIntro, type Intro } from "./intro/intro";
+import { holdLandings } from "./landing-gate";
 import { createLazyPool } from "./lazy-pool";
 import { createDeskScene, WebGLUnavailableError } from "./scene/desk-scene";
 import { createImageLoader } from "./services/image-loader";
 import { createInferencePool, poolSize } from "./services/inference-pool";
 import { loadModels } from "./services/model-loader";
+import { detectPhotoSupport } from "./services/photo-support";
+import {
+  browserRenderWorkers,
+  renderWorkerCount,
+} from "./services/render-workers";
 import { createStream, type StreamLimits } from "./services/stream";
 import { mountOverlay } from "./ui/overlay";
 
 const STATS_INTERVAL_MS = 1_000;
 const FALLBACK_CAPACITY = { desktop: 3200, lowPower: 900 };
+const TOKYO: GeoPoint = { lat: 35.6812, lon: 139.7671 };
+const MAX_ORIGINS = 3000;
+
+interface VisitorBatch {
+  progress: FolderProgress;
+  remaining: number;
+}
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) {
   throw new Error("Application root is missing");
 }
+const appRoot: HTMLElement = root;
 
 const appBase = new URL(import.meta.env.BASE_URL, window.location.href);
 const wasmBaseUrl = new URL("ort/", appBase).href;
@@ -63,21 +81,26 @@ const config = readAppConfig(window.location.search, {
 
 const store = createStore(initialDeskState(0));
 const pendingFiles: File[] = [];
+const pendingBatchFiles = new Map<File, VisitorBatch>();
+const visitorBatches = new Map<string, VisitorBatch>();
+const photoSupport = detectPhotoSupport();
+let latestBatch: VisitorBatch | null = null;
 let reducedMotion = config.reducedMotion;
 let stream: Stream | null = null;
+let intro: Intro | null = null;
 let modelReady = false;
 let streamStatus: StreamStatus = "loading-model";
 let pinned: string | null = null;
 let pausedByVisitor = false;
 let pausedByVisibility = false;
+let openLandingGate: () => void = () => {};
+const landingGate = new Promise<void>((resolve) => {
+  openLandingGate = resolve;
+});
 
-const overlay = mountOverlay(root, {
+const overlay = mountOverlay(appRoot, {
   addFiles(files) {
-    if (stream) {
-      stream.addUserFiles(files);
-    } else {
-      pendingFiles.push(...files);
-    }
+    void acceptVisitorFiles(files);
   },
   togglePause() {
     if (!stream) {
@@ -101,7 +124,17 @@ const overlay = mountOverlay(root, {
   selectModel(id) {
     switchModel(id);
   },
+  skipIntro() {
+    intro?.skip();
+  },
 });
+
+if (config.intro) {
+  overlay.setIntroActive(true);
+  overlay.canvas.style.visibility = "hidden";
+} else {
+  openLandingGate();
+}
 
 function createScene(): DeskScene {
   try {
@@ -121,6 +154,50 @@ function createScene(): DeskScene {
 }
 
 const scene = createScene();
+scene.setViewInsets(overlay.viewInsets());
+overlay.onViewInsetsChange((insets) => scene.setViewInsets(insets));
+
+async function acceptVisitorFiles(files: File[]): Promise<void> {
+  const { photos, skipped } = splitPhotoFiles(files, await photoSupport);
+  const progress: FolderProgress = {
+    found: files.length,
+    accepted: photos.length,
+    skipped,
+    done: photos.length === 0,
+  };
+  overlay.setFolderProgress(progress);
+  if (photos.length === 0) {
+    return;
+  }
+  const batch: VisitorBatch = { progress, remaining: photos.length };
+  latestBatch = batch;
+  for (const photo of photos) {
+    pendingBatchFiles.set(photo, batch);
+  }
+  intro?.skip();
+  if (stream) {
+    stream.addUserFiles(photos);
+  } else {
+    pendingFiles.push(...photos);
+  }
+}
+
+function settleBatch(batch: VisitorBatch): void {
+  batch.remaining -= 1;
+  if (batch.remaining <= 0 && batch === latestBatch) {
+    overlay.setFolderProgress({ ...batch.progress, done: true });
+    latestBatch = null;
+  }
+}
+
+function makeVisitorSource(file: File, id: string): PhotoSource {
+  const batch = pendingBatchFiles.get(file);
+  if (batch) {
+    pendingBatchFiles.delete(file);
+    visitorBatches.set(id, batch);
+  }
+  return userSource(file, id);
+}
 
 function recordOf(id: string | null): PhotoRecord | null {
   return id === null ? null : (store.getState().records.get(id) ?? null);
@@ -169,12 +246,22 @@ function queueStats(): void {
 window.setInterval(queueStats, STATS_INTERVAL_MS);
 
 store.subscribe((state, action) => {
-  const id = action.type === "added" ? action.source.id : "id" in action ? action.id : null;
+  const id =
+    action.type === "added"
+      ? action.source.id
+      : "id" in action
+        ? action.id
+        : null;
   const record = id === null ? undefined : state.records.get(id);
   if (record) {
     overlay.upsertRecord(record);
     if (record.id === pinned) {
       overlay.pin(record);
+    }
+    const batch = visitorBatches.get(record.id);
+    if (batch && (record.phase === "placed" || record.phase === "failed")) {
+      visitorBatches.delete(record.id);
+      settleBatch(batch);
     }
   }
   queueStats();
@@ -205,6 +292,17 @@ async function loadSources(limit: number): Promise<PhotoSource[]> {
   }
   return SAMPLE_PHOTOS.slice(0, limit).map((sample, index) =>
     sampleSource(appBase, sample, `sample-${index + 1}`),
+  );
+}
+
+function nanoWorkers(): number {
+  return (
+    config.workers ??
+    poolSize(
+      navigator.hardwareConcurrency,
+      navigatorHints.deviceMemory,
+      config.lowPower,
+    )
   );
 }
 
@@ -262,17 +360,6 @@ function fullPool(baseUrl: string): InferencePool {
   });
 }
 
-function nanoWorkers(): number {
-  return (
-    config.workers ??
-    poolSize(
-      navigator.hardwareConcurrency,
-      navigatorHints.deviceMemory,
-      config.lowPower,
-    )
-  );
-}
-
 function demoPhotoLimit(): number {
   const room = scene.capacity - Math.min(64, Math.floor(scene.capacity / 10));
   return Math.min(config.limit ?? room, room);
@@ -304,11 +391,52 @@ async function chooseModel(): Promise<{
   return { model, options };
 }
 
+function originsOf(sources: readonly PhotoSource[]): GeoPoint[] {
+  const origins: GeoPoint[] = [];
+  for (const source of sources) {
+    if (source.location && origins.length < MAX_ORIGINS) {
+      origins.push({ lat: source.location.lat, lon: source.location.lon });
+    }
+  }
+  return origins;
+}
+
+async function playIntro(origins: readonly GeoPoint[]): Promise<void> {
+  if (!config.intro) {
+    return;
+  }
+  try {
+    intro = createIntro({
+      container: appRoot,
+      origins,
+      target: TOKYO,
+      textureBaseUrl: new URL("intro/", appBase).href,
+      lowPower: config.lowPower,
+    });
+    overlay.canvas.style.visibility = "";
+    intro.onPhase((phase) => {
+      if (phase === "handoff" || phase === "done") {
+        openLandingGate();
+      }
+    });
+    await intro.play();
+  } catch (error) {
+    console.warn(error);
+  } finally {
+    overlay.canvas.style.visibility = "";
+    openLandingGate();
+    intro?.dispose();
+    intro = null;
+    overlay.setIntroActive(false);
+  }
+}
+
 async function boot(): Promise<void> {
   overlay.setStatus("loading-model");
   scene.start();
-  const { model, options } = await chooseModel();
   const sources = await loadSources(demoPhotoLimit());
+  void playIntro(originsOf(sources));
+  const { model, options } = await chooseModel();
   store.dispatch({ type: "totalChanged", total: sources.length });
   const chosen = choosePool(
     model,
@@ -337,13 +465,25 @@ async function boot(): Promise<void> {
       );
     },
   );
+  const renderWorkers = browserRenderWorkers(
+    renderWorkerCount(
+      navigator.hardwareConcurrency,
+      navigatorHints.deviceMemory,
+      config.lowPower,
+    ),
+  );
   stream = createStream({
     sources,
-    makeUserSource: userSource,
-    loader: createImageLoader({ tileSize: scene.tileSize, timeoutMs: 15_000 }),
+    makeUserSource: makeVisitorSource,
+    loader: createImageLoader({
+      tileSize: scene.tileSize,
+      timeoutMs: 15_000,
+      render: renderWorkers.render,
+      heavyDecodes: renderWorkers.size,
+    }),
     pool,
     store,
-    scene,
+    scene: holdLandings(scene, landingGate),
     random: mulberry32(config.seed ^ 0x9e3779b9),
     now: () => performance.now(),
     wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
@@ -382,6 +522,9 @@ document.addEventListener("visibilitychange", () => {
 
 boot().catch((error: unknown) => {
   console.error(error);
+  openLandingGate();
+  overlay.canvas.style.visibility = "";
+  overlay.setIntroActive(false);
   overlay.notice(
     error instanceof Error ? error.message : "デモを開始できませんでした。",
   );

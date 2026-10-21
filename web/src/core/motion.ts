@@ -17,6 +17,8 @@ export const REDUCED_FADE_SECONDS = 0.2;
 export const REDUCED_SLIDE_SECONDS = 0.3;
 export const REPLAY_STAGGER_SECONDS = 0.0006;
 export const REPLAY_MAX_SECONDS = 4;
+export const MARK_WRITE_SECONDS = 0.35;
+export const MARK_LEAD_SECONDS = 0.4;
 
 const FALL_TOUCHDOWN = 0.86;
 const FLIGHT_TOUCHDOWN = 0.9;
@@ -275,6 +277,13 @@ export function turnInPlacePose(
     lerp(from.tiltZ, to.tiltZ, slide) + corner * CORNER_ROLL * direction;
   out.scale = lerp(from.scale, to.scale, slide);
   return out;
+}
+
+export function straightenStart(now: number, markStart: number): number {
+  if (!Number.isFinite(markStart)) {
+    return now;
+  }
+  return Math.max(now, markStart + MARK_LEAD_SECONDS);
 }
 
 export function replayDelay(

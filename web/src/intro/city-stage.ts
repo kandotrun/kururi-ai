@@ -2,8 +2,10 @@ import {
   AdditiveBlending,
   BackSide,
   BoxGeometry,
-  type BufferGeometry,
+  BufferAttribute,
+  BufferGeometry,
   Color,
+  DoubleSide,
   InstancedBufferAttribute,
   InstancedMesh,
   LinearSRGBColorSpace,
@@ -24,21 +26,30 @@ import type { CameraPose } from "./camera-path";
 import {
   BUILDING_STRIDE,
   CORRIDOR,
+  EXPRESSWAYS,
   HERO_WINDOW,
   STREETS,
+  aviationBeacons,
   buildCity,
+  sampleExpressway,
 } from "./city-plan";
 import {
+  BEACON_FRAGMENT,
+  BEACON_VERTEX,
   BUILDING_FRAGMENT,
   BUILDING_VERTEX,
   CITY_SKY_FRAGMENT,
   CITY_VERTEX,
+  EXPRESSWAY_FRAGMENT,
+  EXPRESSWAY_VERTEX,
   GLOW_FRAGMENT,
   GLOW_VERTEX,
   GROUND_FRAGMENT,
+  STREAM_CARD_VERTEX,
   STREAM_FRAGMENT,
   STREAM_VERTEX,
 } from "./city-shaders";
+import { CARD_FRAGMENT } from "./globe-shaders";
 import { envelope, smoothstep } from "./easing";
 import { applyPose, quadGeometry, ribbonGeometry } from "./stage-util";
 
@@ -49,6 +60,44 @@ export interface CityStageOptions {
 
 function linear(r: number, g: number, b: number): Color {
   return new Color().setRGB(r, g, b, LinearSRGBColorSpace);
+}
+
+function expresswayGeometry(
+  width: number,
+  points: readonly { x: number; y: number; z: number }[],
+): BufferGeometry {
+  const count = points.length;
+  const positions = new Float32Array(count * 2 * 3);
+  const road = new Float32Array(count * 2 * 2);
+  let along = 0;
+  for (let index = 0; index < count; index += 1) {
+    const point = points[index]!;
+    const before = points[Math.max(0, index - 1)]!;
+    const after = points[Math.min(count - 1, index + 1)]!;
+    let dx = after.x - before.x;
+    let dz = after.z - before.z;
+    const length = Math.hypot(dx, dz) || 1;
+    dx /= length;
+    dz /= length;
+    if (index > 0) {
+      const previous = points[index - 1]!;
+      along += Math.hypot(point.x - previous.x, point.y - previous.y, point.z - previous.z);
+    }
+    const nx = -dz * (width / 2);
+    const nz = dx * (width / 2);
+    positions.set([point.x + nx, point.y, point.z + nz, point.x - nx, point.y, point.z - nz], index * 6);
+    road.set([along, 1, along, -1], index * 4);
+  }
+  const indices: number[] = [];
+  for (let index = 0; index < count - 1; index += 1) {
+    const a = index * 2;
+    indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new BufferAttribute(positions, 3));
+  geometry.setAttribute("aRoad", new BufferAttribute(road, 2));
+  geometry.setIndex(indices);
+  return geometry;
 }
 
 export class CityStage {
@@ -62,14 +111,16 @@ export class CityStage {
     uZenith: { value: linear(0.0021, 0.0052, 0.0064) },
     uHorizon: { value: linear(0.026, 0.035, 0.034) },
     uTwilight: { value: linear(0.05, 0.024, 0.01) },
-    uFogDensity: { value: 1 / 8500 },
+    uFogDensity: { value: 1 / 6200 },
     uTime: { value: 0 },
   };
   private readonly sky: Mesh;
   private readonly ground: ShaderMaterial;
   private readonly buildings: ShaderMaterial;
   private readonly stream: ShaderMaterial;
+  private readonly cards: ShaderMaterial;
   private readonly glow: ShaderMaterial;
+  private readonly beacons: ShaderMaterial;
 
   constructor(options: CityStageOptions) {
     const skyMaterial = this.material({
@@ -136,8 +187,8 @@ export class CityStage {
         uWindowSize: {
           value: new Vector2(HERO_WINDOW.width, HERO_WINDOW.height),
         },
-        uHeroGlow: { value: 1.5 },
-        uWindowGain: { value: 1.6 },
+        uHeroGlow: { value: 1.2 },
+        uWindowGain: { value: 1.0 },
       },
       vertexShader: BUILDING_VERTEX,
       fragmentShader: BUILDING_FRAGMENT,
@@ -167,7 +218,7 @@ export class CityStage {
     buildingMesh.instanceMatrix.needsUpdate = true;
     buildingMesh.frustumCulled = false;
 
-    const strands = options.lowPower ? 70 : 160;
+    const strands = options.lowPower ? 60 : 110;
     const streamGeometry = this.track(ribbonGeometry(options.lowPower ? 32 : 48));
     const p0 = new Float32Array(strands * 4);
     const p1 = new Float32Array(strands * 4);
@@ -179,13 +230,13 @@ export class CityStage {
       const sx = HERO_WINDOW.x + Math.cos(angle) * reach;
       const sz = HERO_WINDOW.z - 700 + Math.sin(angle) * reach * 0.9;
       const sy = 1500 + 1500 * random();
-      p0.set([sx, sy, sz, random()], index * 4);
+      p0.set([sx, sy, sz, 6.0 + 0.85 * Math.pow(random(), 1.2)], index * 4);
       p1.set(
         [
           sx + (HERO_WINDOW.x - sx) * 0.2,
           sy * (0.35 + 0.2 * random()),
           sz + (HERO_WINDOW.z + 500 - sz) * 0.3,
-          0.32 + 0.3 * random(),
+          0.8 + 0.5 * random(),
         ],
         index * 4,
       );
@@ -216,6 +267,7 @@ export class CityStage {
       },
       vertexShader: STREAM_VERTEX,
       fragmentShader: STREAM_FRAGMENT,
+      side: DoubleSide,
       transparent: true,
       blending: AdditiveBlending,
       depthWrite: false,
@@ -223,6 +275,74 @@ export class CityStage {
     const streamMesh = new Mesh(streamGeometry, this.stream);
     streamMesh.frustumCulled = false;
     streamMesh.renderOrder = 5;
+
+    const cardGeometry = this.track(quadGeometry());
+    cardGeometry.setAttribute("aP0", new InstancedBufferAttribute(p0, 4));
+    cardGeometry.setAttribute("aP1", new InstancedBufferAttribute(p1, 4));
+    cardGeometry.setAttribute("aP2", new InstancedBufferAttribute(p2, 4));
+    cardGeometry.instanceCount = strands;
+    this.cards = this.material({
+      uniforms: {
+        uEnd: { value: this.stream.uniforms.uEnd!.value },
+        uTime: { value: 0 },
+        uViewport: { value: this.viewport },
+        uCardPixels: { value: 2 },
+        uCardWorld: { value: 1.4 },
+        uCardMax: { value: 12 },
+        uCardShare: { value: 0.5 },
+        uFade: { value: 1 },
+        uBrightness: { value: 1.3 },
+      },
+      vertexShader: STREAM_CARD_VERTEX,
+      fragmentShader: CARD_FRAGMENT,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    const cardMesh = new Mesh(cardGeometry, this.cards);
+    cardMesh.frustumCulled = false;
+    cardMesh.renderOrder = 6;
+
+    const expressway = this.material({
+      uniforms: { ...this.common },
+      vertexShader: EXPRESSWAY_VERTEX,
+      fragmentShader: EXPRESSWAY_FRAGMENT,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    for (const road of EXPRESSWAYS) {
+      const mesh = new Mesh(this.track(expresswayGeometry(road.width, sampleExpressway(road, 360))), expressway);
+      mesh.frustumCulled = false;
+      this.scene.add(mesh);
+    }
+
+    const beaconLayout = aviationBeacons(layout);
+    const beaconGeometry = this.track(quadGeometry());
+    beaconGeometry.setAttribute(
+      "aBeacon",
+      new InstancedBufferAttribute(
+        beaconLayout.count > 0 ? beaconLayout.data : new Float32Array(4),
+        4,
+      ),
+    );
+    beaconGeometry.instanceCount = beaconLayout.count;
+    this.beacons = this.material({
+      uniforms: {
+        uViewport: { value: this.viewport },
+        uSize: { value: 3 },
+        uTime: { value: 0 },
+      },
+      vertexShader: BEACON_VERTEX,
+      fragmentShader: BEACON_FRAGMENT,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    const beaconMesh = new Mesh(beaconGeometry, this.beacons);
+    beaconMesh.frustumCulled = false;
+    beaconMesh.renderOrder = 4;
+    this.scene.add(cardMesh, beaconMesh);
 
     this.glow = this.material({
       uniforms: {
@@ -264,13 +384,21 @@ export class CityStage {
     this.common.uTime.value = time;
     this.stream.uniforms.uTime!.value = time;
     this.stream.uniforms.uWidth!.value = 2.1 * pixelRatio;
-    this.stream.uniforms.uGain!.value =
-      1.5 * envelope(time, 5.5, 6.05, 7.15, 7.42);
+    const streamGain = envelope(time, 5.95, 6.4, 7.6, 7.88);
+    this.stream.uniforms.uGain!.value = 1.4 * streamGain;
+    this.cards.uniforms.uTime!.value = time;
+    this.cards.uniforms.uFade!.value = streamGain;
+    this.cards.uniforms.uCardPixels!.value = 1.6 * pixelRatio;
+    this.cards.uniforms.uCardMax!.value = 11 * pixelRatio;
+    this.beacons.uniforms.uTime!.value = time;
+    this.beacons.uniforms.uSize!.value = 2.6 * pixelRatio;
     this.glow.uniforms.uIntensity!.value =
-      (0.5 + 1.6 * smoothstep(6.3, 7.3, time)) * smoothstep(5.5, 6.0, time);
+      (0.4 + 0.9 * smoothstep(6.8, 7.45, time)) *
+      smoothstep(6.0, 6.5, time) *
+      (1 - smoothstep(7.45, 7.72, time));
     this.glow.uniforms.uSize!.value = 7 * pixelRatio;
     this.buildings.uniforms.uHeroGlow!.value =
-      1.8 + 6 * smoothstep(6.9, 7.38, time);
+      1.5 + 0.7 * smoothstep(7.2, 7.8, time);
   }
 
   dispose(): void {

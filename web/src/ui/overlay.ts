@@ -11,7 +11,10 @@ import type {
   StreamStatus,
 } from "../contracts";
 import { modelOptions } from "../core/model-profiles";
+import { RAW_EXTENSIONS, classifyPhotoFile } from "../core/photo-files";
+import { visitorPreviewBlob } from "../services/image-loader";
 import { createAbout } from "./about";
+import { createVisitorImages } from "./visitor-images";
 import { createAnnouncer } from "./announcer";
 import { createConfirmSlip } from "./confirm-slip";
 import {
@@ -27,8 +30,11 @@ import { createCounter } from "./counter";
 import { createDecisionLog } from "./decision-log";
 import { externalLink, h, mediaQuery, phrased, setText } from "./dom";
 import { createDropZone } from "./drop-zone";
-import { pickImageFiles } from "./files";
+import { entryAccess } from "./folder-entries";
+import { createFolderImport } from "./folder-import";
+import { createFolderStatus } from "./folder-status";
 import { formatCount } from "./format";
+import { createInsetTracker } from "./inset-tracker";
 import { createLedger } from "./ledger";
 import { GITHUB_URL, RELEASE_URL } from "./links";
 import { createLoupe } from "./loupe";
@@ -36,6 +42,8 @@ import { createModelPicker } from "./model-picker";
 import { createRuler } from "./ruler";
 
 const LEDGER_LIMIT = 200;
+const VISITOR_PREVIEW_SIDE = 960;
+const VISITOR_IMAGE_LIMIT = 64;
 const ANNOUNCE_INTERVAL_MS = 5000;
 const LOCAL_NOTICE_MS = 4500;
 
@@ -56,8 +64,37 @@ const DEFAULT_MODEL: ModelName = modelOptions({
   fullBaseUrl: null,
 })[0] ?? { label: "軽量", version: "v2-nano" };
 
-const REJECTED_NOTICE =
-  "画像ファイルが見つかりませんでした。JPEG、PNG、WebP などの写真を選んでください。";
+const PHOTO_ACCEPT = [
+  "image/*",
+  ...RAW_EXTENSIONS.map((extension) => `.${extension}`),
+].join(",");
+
+function pathOf(file: File): string {
+  return file.webkitRelativePath || file.name;
+}
+
+function countsAsPhoto(file: File): boolean {
+  return classifyPhotoFile(pathOf(file), file.type) !== "skip";
+}
+
+function mayBePhoto(file: File): boolean {
+  return classifyPhotoFile(pathOf(file), file.type, { heic: true }) !== "skip";
+}
+
+function supportsFolderPicker(): boolean {
+  return (
+    "webkitdirectory" in HTMLInputElement.prototype &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(any-pointer: fine)").matches
+  );
+}
+
+const visitorImages = createVisitorImages({
+  preview: (file) => visitorPreviewBlob(file, VISITOR_PREVIEW_SIDE),
+  createUrl: (blob) => URL.createObjectURL(blob),
+  revokeUrl: (url) => URL.revokeObjectURL(url),
+  limit: VISITOR_IMAGE_LIMIT,
+});
 
 export function mountOverlay(
   root: HTMLElement,
@@ -77,6 +114,8 @@ export function mountOverlay(
   let webgl = true;
   let shownHeadline: HeadlineState | null = null;
   let modelName: ModelName = DEFAULT_MODEL;
+  let introActive = false;
+  let skipWithKeyboard = false;
 
   const canvas = h("canvas", {
     class: "desk-canvas",
@@ -115,7 +154,7 @@ export function mountOverlay(
 
   const fileInput = h("input", {
     type: "file",
-    accept: "image/*",
+    accept: PHOTO_ACCEPT,
     multiple: true,
     hidden: true,
     tabindex: "-1",
@@ -123,6 +162,15 @@ export function mountOverlay(
   const addButton = h("button", { type: "button", class: "paper-button" }, [
     "自分の写真を並べる",
   ]);
+  const folderButton = h(
+    "button",
+    {
+      type: "button",
+      class: "text-button folder-button",
+      hidden: !supportsFolderPicker(),
+    },
+    ["フォルダを選ぶ"],
+  );
   const pauseButton = h("button", { type: "button", class: "text-button" }, [
     "一時停止",
   ]);
@@ -141,7 +189,7 @@ export function mountOverlay(
     },
     ["一覧"],
   );
-  const simulateInput = h("input", { type: "checkbox", checked: true });
+  const simulateInput = h("input", { type: "checkbox" });
   const ruler = createRuler();
   const confirmSlip = createConfirmSlip({
     sheet,
@@ -151,22 +199,48 @@ export function mountOverlay(
     confirm: confirmSlip,
     onSelect: (id: ModelId) => handlers.selectModel(id),
   });
+  const folderImport = createFolderImport({
+    access: entryAccess,
+    countsAsPhoto,
+    mayBePhoto,
+    onFiles: (files) => handlers.addFiles(files),
+    onScan: (photos) => folderStatus.scanning(photos),
+    onNotice: (message, kind) => {
+      if (kind === "empty") {
+        folderStatus.empty(message);
+      } else {
+        flashNotice(message);
+      }
+    },
+  });
+  const folderStatus = createFolderStatus({
+    onCancel: () => folderImport.cancel(),
+  });
   const actions = h("div", { class: "actions" }, [
-    h("div", { class: "action-row" }, [
-      addButton,
-      h("div", { class: "action-texts" }, [
-        pauseButton,
-        scatterButton,
-        listButton,
-      ]),
-    ]),
+    h("div", { class: "action-row action-add" }, [addButton, folderButton]),
     h("label", { class: "check" }, [
       simulateInput,
       h("span", {}, ["自分の写真もわざと回転させる"]),
     ]),
+    folderStatus.element,
+    h("div", { class: "action-texts" }, [
+      pauseButton,
+      scatterButton,
+      listButton,
+    ]),
     picker.element,
     fileInput,
   ]);
+  const skipButton = h(
+    "button",
+    {
+      type: "button",
+      class: "skip-intro",
+      hidden: true,
+      "aria-label": "オープニングをスキップ",
+    },
+    ["スキップ"],
+  );
 
   const flatOpen = h("button", { type: "button", class: "ink-button" }, [
     "一覧を開く",
@@ -188,10 +262,8 @@ export function mountOverlay(
     flatOpen,
   ]);
 
-  const stage = h("main", { class: "stage" }, [
-    h("div", { class: "intro" }, [headline, lede]),
-    actions,
-  ]);
+  const headlineBlock = h("div", { class: "intro" }, [headline, lede]);
+  const stage = h("main", { class: "stage" }, [headlineBlock, actions]);
 
   const counter = createCounter(digits, reducedMotion);
 
@@ -213,6 +285,7 @@ export function mountOverlay(
   }
 
   const ledger = createLedger({
+    images: visitorImages,
     records,
     log,
     limit: LEDGER_LIMIT,
@@ -226,6 +299,7 @@ export function mountOverlay(
   }
 
   const loupe = createLoupe({
+    images: visitorImages,
     onClose: closePin,
     sheet,
     reserveTop: () => masthead.offsetHeight,
@@ -246,15 +320,13 @@ export function mountOverlay(
     }, LOCAL_NOTICE_MS);
   }
 
-  function addFiles(files: File[]): void {
-    if (files.length > 0) {
-      handlers.addFiles(files);
-    }
-  }
-
   const drop = createDropZone(window, {
-    onFiles: addFiles,
-    onRejected: () => flashNotice(REJECTED_NOTICE),
+    onDrop: ({ files, folders }) => {
+      if (folders.length === 0 || files.some(mayBePhoto)) {
+        folderImport.addFiles(files, "files");
+      }
+      void folderImport.importFolders(folders);
+    },
   });
 
   const announcer = createAnnouncer(ANNOUNCE_INTERVAL_MS);
@@ -269,6 +341,7 @@ export function mountOverlay(
       ledger.element,
       flat,
       loupe.element,
+      skipButton,
       drop.element,
       announcer.element,
     ],
@@ -278,10 +351,35 @@ export function mountOverlay(
   root.classList.add("desk-root");
   root.replaceChildren(canvas, overlay, about.element, confirmSlip.element);
 
-  addButton.addEventListener("click", () => fileInput.click());
+  function photoPicker(): void {
+    fileInput.webkitdirectory = false;
+    fileInput.accept = PHOTO_ACCEPT;
+  }
+
+  function openPicker(folder: boolean): void {
+    if (folder) {
+      fileInput.webkitdirectory = true;
+      fileInput.removeAttribute("accept");
+    } else {
+      photoPicker();
+    }
+    fileInput.click();
+  }
+
+  addButton.addEventListener("click", () => openPicker(false));
+  folderButton.addEventListener("click", () => openPicker(true));
   fileInput.addEventListener("change", () => {
-    addFiles(pickImageFiles(fileInput.files));
+    const files = Array.from(fileInput.files ?? []);
+    const origin = fileInput.webkitdirectory ? "folder" : "files";
     fileInput.value = "";
+    photoPicker();
+    folderImport.addFiles(files, origin);
+  });
+  fileInput.addEventListener("cancel", photoPicker);
+  skipButton.addEventListener("click", (event) => {
+    skipWithKeyboard = event.detail === 0;
+    skipButton.disabled = true;
+    handlers.skipIntro();
   });
   pauseButton.addEventListener("click", () => handlers.togglePause());
   scatterButton.addEventListener("click", () => handlers.scatter());
@@ -300,6 +398,14 @@ export function mountOverlay(
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.key !== "Escape" || about.isOpen || confirmSlip.isOpen) {
+      return;
+    }
+    if (introActive) {
+      if (!skipButton.disabled) {
+        event.preventDefault();
+        skipButton.disabled = true;
+        handlers.skipIntro();
+      }
       return;
     }
     if (loupe.pinnedId() !== null) {
@@ -326,6 +432,49 @@ export function mountOverlay(
   syncChromeSizes();
   window.addEventListener("resize", () => loupe.reposition());
   renderHeadline();
+
+  const insets = createInsetTracker(
+    {
+      masthead,
+      headline: [headlineLabel, headline.querySelector<HTMLElement>(".headline-count") ?? headline],
+      text: [lede],
+      actions: () =>
+        Array.from(actions.children).filter(
+          (child): child is HTMLElement =>
+            child instanceof HTMLElement && child !== fileInput,
+        ),
+      ruler: ruler.element,
+      observe: [masthead, headlineBlock, lede, actions, ruler.element],
+    },
+    sheet,
+  );
+
+  function setIntroActive(active: boolean): void {
+    if (active === introActive) {
+      return;
+    }
+    introActive = active;
+    overlay.toggleAttribute("data-intro", active);
+    stage.inert = active;
+    ruler.element.inert = active;
+    skipButton.hidden = !active;
+    skipButton.disabled = false;
+    if (active) {
+      loupe.pin(null);
+      loupe.hide();
+      closeLedger();
+    } else {
+      const refocus =
+        skipWithKeyboard &&
+        (document.activeElement === skipButton ||
+          document.activeElement === document.body);
+      skipWithKeyboard = false;
+      if (refocus) {
+        addButton.focus({ preventScroll: true });
+      }
+    }
+    insets.setSuspended(active);
+  }
 
   function renderHeadline(): void {
     const next = headlineState(stats, status);
@@ -391,7 +540,7 @@ export function mountOverlay(
       loupe.refresh(record);
     },
     showLoupe(record, at) {
-      if (webgl) {
+      if (webgl && !introActive) {
         loupe.show(record, at);
       }
     },
@@ -423,6 +572,16 @@ export function mountOverlay(
       overlay.dataset.model = current;
       picker.set(current, options);
       renderState();
+    },
+    setIntroActive,
+    viewInsets() {
+      return insets.current();
+    },
+    onViewInsetsChange(handler) {
+      return insets.onChange(handler);
+    },
+    setFolderProgress(progress) {
+      folderStatus.report(progress);
     },
   };
 }

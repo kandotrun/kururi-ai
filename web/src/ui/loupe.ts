@@ -1,9 +1,11 @@
+import type { VisitorImages } from "./visitor-images";
 import type { PhotoRecord, Quarter, ScreenPoint } from "../contracts";
 import { expectedCorrection } from "../core/rotation";
 import {
   creditText,
   judgementText,
   loupeRotation,
+  photoPlace,
   verdictOf,
 } from "./copy";
 import { externalLink, h, setText } from "./dom";
@@ -14,6 +16,7 @@ import { renderVerdict } from "./verdict";
 const QUARTERS: readonly Quarter[] = [0, 1, 2, 3];
 
 export interface LoupeOptions {
+  images: VisitorImages;
   onClose(): void;
   sheet(): boolean;
   reserveTop(): number;
@@ -74,9 +77,12 @@ export function createLoupe(options: LoupeOptions): LoupeView {
   const confidence = h("dd");
   const timing = h("dd");
   const timingFact = fact("処理時間", timing);
+  const placeValue = h("dd");
+  const placeFact = fact("撮影地", placeValue);
   const facts = h("dl", { class: "slip-facts" }, [
     fact("判定", judgement),
     fact("確信度", confidence),
+    placeFact,
     timingFact,
   ]);
   const verdict = h("p", { class: "verdict slip-verdict" });
@@ -127,28 +133,12 @@ export function createLoupe(options: LoupeOptions): LoupeView {
   let photoId: string | null = null;
   let photoUrl: string | null = null;
   let photoToken = 0;
-  let objectUrl: { id: string; url: string } | null = null;
   let returnFocus: HTMLElement | null = null;
 
   close.addEventListener("click", () => options.onClose());
 
-  function releaseObjectUrl(keepId: string | null): void {
-    if (objectUrl && objectUrl.id !== keepId) {
-      URL.revokeObjectURL(objectUrl.url);
-      objectUrl = null;
-    }
-  }
-
   function urlFor(record: PhotoRecord, pinned: boolean): string | null {
     const { source } = record;
-    if (source.file) {
-      releaseObjectUrl(record.id);
-      if (!objectUrl) {
-        objectUrl = { id: record.id, url: URL.createObjectURL(source.file) };
-      }
-      return objectUrl.url;
-    }
-    releaseObjectUrl(null);
     return pinned
       ? (source.largeUrl ?? source.thumbUrl)
       : (source.thumbUrl ?? source.largeUrl);
@@ -160,7 +150,6 @@ export function createLoupe(options: LoupeOptions): LoupeView {
   }
 
   function setPhoto(record: PhotoRecord, pinned: boolean): void {
-    const url = urlFor(record, pinned);
     if (record.id !== photoId) {
       photoId = record.id;
       photoUrl = null;
@@ -169,6 +158,27 @@ export function createLoupe(options: LoupeOptions): LoupeView {
       photo.dataset.ready = "false";
       setAspect(record.aspect);
     }
+    const { file } = record.source;
+    if (file) {
+      const id = record.id;
+      options.images.url(file).then(
+        (url) => {
+          if (photoId === id) {
+            showPhoto(url);
+          }
+        },
+        () => {
+          if (photoId === id) {
+            photo.dataset.ready = "failed";
+          }
+        },
+      );
+      return;
+    }
+    showPhoto(urlFor(record, pinned));
+  }
+
+  function showPhoto(url: string | null): void {
     if (url === photoUrl || url === null) {
       return;
     }
@@ -301,6 +311,9 @@ export function createLoupe(options: LoupeOptions): LoupeView {
       confidence,
       record.prediction ? formatConfidence(record.prediction.confidence) : "—",
     );
+    const where = photoPlace(record.source);
+    placeFact.hidden = where === null;
+    setText(placeValue, where ?? "");
     timingFact.hidden = !pinned || record.prediction === null;
     setText(
       timing,
@@ -334,7 +347,6 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     photoId = null;
     photoUrl = null;
     photoToken += 1;
-    releaseObjectUrl(null);
   }
 
   return {

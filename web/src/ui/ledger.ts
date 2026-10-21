@@ -1,6 +1,7 @@
+import type { VisitorImages } from "./visitor-images";
 import type { PhotoRecord } from "../contracts";
 import { finalQuarter } from "../core/rotation";
-import { creditText, judgementText, verdictOf } from "./copy";
+import { creditText, judgementText, photoPlace, verdictOf } from "./copy";
 import type { DecisionLog } from "./decision-log";
 import { externalLink, h, setText } from "./dom";
 import { formatCount } from "./format";
@@ -12,6 +13,7 @@ export interface LedgerOptions {
   records: ReadonlyMap<string, PhotoRecord>;
   log: DecisionLog;
   limit: number;
+  images: VisitorImages;
   onSelect(id: string): void;
   onClose(): void;
 }
@@ -84,7 +86,6 @@ export function createLedger(options: LedgerOptions): LedgerView {
     ],
   );
 
-  const objectUrls = new Map<HTMLTableRowElement, string>();
   let open = false;
   let renderedSize = 0;
   let timer = 0;
@@ -102,21 +103,28 @@ export function createLedger(options: LedgerOptions): LedgerView {
     }
   });
 
-  function thumbnail(record: PhotoRecord, row: HTMLTableRowElement): Node {
+  function thumbnail(record: PhotoRecord): Node {
     const { source } = record;
-    let url = source.thumbUrl ?? source.largeUrl;
-    if (!url && source.file) {
-      url = URL.createObjectURL(source.file);
-      objectUrls.set(row, url);
-    }
+    const url = source.thumbUrl ?? source.largeUrl;
     const frame = h("span", { class: "ledger-thumb", "aria-hidden": "true" });
-    if (url) {
+    if (url || source.file) {
       const image = h("img", {
-        src: url,
         alt: "",
         loading: "lazy",
         decoding: "async",
       });
+      if (url) {
+        image.src = url;
+      } else if (source.file) {
+        options.images.url(source.file).then(
+          (visitorUrl) => {
+            image.src = visitorUrl;
+          },
+          () => {
+            frame.dataset.failed = "true";
+          },
+        );
+      }
       const quarter = record.prediction
         ? finalQuarter(record.simulated, record.prediction.correction)
         : record.simulated;
@@ -134,6 +142,13 @@ export function createLedger(options: LedgerOptions): LedgerView {
       : document.createTextNode(text);
   }
 
+  function place(record: PhotoRecord): Node | null {
+    const where = photoPlace(record.source);
+    return where === null
+      ? null
+      : h("span", { class: "ledger-place" }, [`撮影地 ${where}`]);
+  }
+
   function row(record: PhotoRecord): HTMLTableRowElement {
     const verdict = verdictOf(record);
     const line = h("tr", { "data-tone": verdict.tone, "data-id": record.id });
@@ -142,7 +157,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
     line.append(
       h("th", { scope: "row" }, [
         h("div", { class: "ledger-item" }, [
-          thumbnail(record, line),
+          thumbnail(record),
           h(
             "button",
             { type: "button", class: "ledger-photo", "data-id": record.id },
@@ -153,6 +168,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
             ],
           ),
           h("span", { class: "ledger-credit" }, [credit(record)]),
+          place(record),
         ]),
       ]),
       h("td", {}, [judgementText(record)]),
@@ -161,19 +177,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
     return line;
   }
 
-  function release(line: HTMLTableRowElement): void {
-    const url = objectUrls.get(line);
-    if (url) {
-      URL.revokeObjectURL(url);
-      objectUrls.delete(line);
-    }
-  }
-
   function clearRows(): void {
-    for (const url of objectUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-    objectUrls.clear();
     tbody.replaceChildren();
     renderedSize = 0;
   }
@@ -211,7 +215,6 @@ export function createLedger(options: LedgerOptions): LedgerView {
         if (!last) {
           break;
         }
-        release(last);
         last.remove();
       }
     }

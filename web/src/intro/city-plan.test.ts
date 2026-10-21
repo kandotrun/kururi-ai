@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import { mulberry32 } from "../core/random";
 import {
   BUILDING_STRIDE,
+  CORRIDOR,
+  EXPRESSWAYS,
   HERO,
   HERO_WINDOW,
-  ROOM,
   STREETS,
+  aviationBeacons,
   buildCity,
+  expresswayDistance,
+  sampleExpressway,
   shorelineZ,
   streetDistance,
 } from "./city-plan";
@@ -42,9 +46,36 @@ describe("hero building", () => {
 });
 
 describe("shoreline", () => {
-  it("keeps the bay south of the hero building", () => {
+  it("puts the bay ahead of the hero window, beyond the towers", () => {
     for (let x = -3000; x <= 3000; x += 50) {
-      expect(shorelineZ(x)).toBeGreaterThan(350);
+      expect(shorelineZ(x)).toBeLessThan(-1500);
+      expect(shorelineZ(x)).toBeGreaterThan(-2600);
+    }
+  });
+});
+
+describe("expressways", () => {
+  it("stay clear of the hero building and the approach corridor", () => {
+    expect(EXPRESSWAYS.length).toBeGreaterThan(0);
+    expect(expresswayDistance(HERO_WINDOW.x, HERO_WINDOW.z)).toBeGreaterThan(80);
+    for (let x = CORRIDOR.minX; x <= CORRIDOR.maxX; x += 10) {
+      for (let z = CORRIDOR.minZ; z <= CORRIDOR.maxZ; z += 10) {
+        expect(expresswayDistance(x, z)).toBeGreaterThan(30);
+      }
+    }
+  });
+
+  it("samples a smooth elevated deck", () => {
+    for (const road of EXPRESSWAYS) {
+      const points = sampleExpressway(road, 200);
+      expect(points.length).toBe(201);
+      for (let index = 1; index < points.length; index += 1) {
+        const a = points[index - 1]!;
+        const b = points[index]!;
+        expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeGreaterThan(1);
+        expect(b.y).toBeGreaterThan(8);
+        expect(Math.abs(b.y - a.y)).toBeLessThan(2);
+      }
     }
   });
 });
@@ -75,7 +106,8 @@ describe("buildCity", () => {
       const maxX = b.x + b.width / 2;
       const minZ = b.z - b.depth / 2;
       const maxZ = b.z + b.depth / 2;
-      expect(maxZ).toBeLessThan(shorelineZ(b.x) - 10);
+      expect(minZ).toBeGreaterThan(shorelineZ(b.x) + 10);
+      expect(expresswayDistance(b.x, b.z)).toBeGreaterThan(Math.hypot(b.width, b.depth) / 2);
       expect(streetDistance(b.x, b.z)).toBeGreaterThan(STREETS.width / 2);
       const inCorridor = maxX > -110 && minX < 150 && maxZ > 0 && minZ < 420;
       if (inCorridor) {
@@ -93,12 +125,30 @@ describe("buildCity", () => {
   });
 });
 
-describe("room", () => {
-  it("places the window between the desk and the outside", () => {
-    expect(ROOM.windowZ).toBeGreaterThan(ROOM.deskHalfDepth + 2);
-    expect(ROOM.matHalfWidth).toBeLessThan(ROOM.deskHalfWidth);
-    expect(ROOM.matHalfDepth).toBeLessThan(ROOM.deskHalfDepth);
-    expect(ROOM.windowBottom).toBeGreaterThan(ROOM.floorY);
-    expect(ROOM.windowTop).toBeLessThan(ROOM.ceilingY);
+describe("night lighting plan", () => {
+  const city = buildCity(mulberry32(11), { radius: 2400, maxBuildings: 9000 });
+
+  it("keeps most windows dark with a few nearly dark buildings", () => {
+    let total = 0;
+    let dark = 0;
+    for (let index = 1; index < city.count; index += 1) {
+      const lit = building(city.data, index).lit;
+      total += lit;
+      if (lit < 0.06) {
+        dark += 1;
+      }
+    }
+    const average = total / (city.count - 1);
+    expect(average).toBeGreaterThan(0.05);
+    expect(average).toBeLessThan(0.25);
+    expect(dark / (city.count - 1)).toBeGreaterThan(0.1);
+  });
+
+  it("puts blinking aviation lights only on tall buildings", () => {
+    const beacons = aviationBeacons(city);
+    expect(beacons.count).toBeGreaterThan(20);
+    for (let index = 0; index < beacons.count; index += 1) {
+      expect(beacons.data[index * 4 + 1]!).toBeGreaterThan(70);
+    }
   });
 });

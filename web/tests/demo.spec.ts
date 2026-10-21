@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 const FIXTURE = resolve(import.meta.dirname, "../public/samples/sample4.webp");
@@ -105,4 +107,49 @@ test("explains when Wikimedia Commons cannot be reached", async ({ page }) => {
   await expect(
     page.locator(".ledger-table tbody tr", { hasText: "サンプル写真" }),
   ).toHaveCount(3, { timeout: 90_000 });
+});
+
+test("lines up every photo in a dropped-in folder and skips videos", async ({ page }) => {
+  const errors = watchErrors(page);
+  await serveCommonsLocally(page);
+  const folder = await mkdtemp(join(tmpdir(), "kururi-folder-"));
+  await mkdir(join(folder, "trip", "day2"), { recursive: true });
+  await copyFile(VISITOR_PHOTO, join(folder, "trip", "beach.webp"));
+  await copyFile(FIXTURE, join(folder, "trip", "day2", "street.webp"));
+  await writeFile(join(folder, "trip", "clip.mov"), "not a photo");
+  await writeFile(join(folder, ".DS_Store"), "");
+  await page.goto("/?seed=4&limit=4&workers=2&intro=off");
+  await page.locator('input[type="file"]').evaluate((input) => {
+    (input as HTMLInputElement).webkitdirectory = true;
+  });
+  await page.locator('input[type="file"]').setInputFiles(folder);
+  await expect(page.locator(".folder-status")).toContainText("2枚", {
+    timeout: 30_000,
+  });
+  await expect(page.locator(".folder-status")).toContainText("対象外");
+  await expect(headline(page)).toHaveAccessibleName(/並べ終えた写真/, {
+    timeout: 150_000,
+  });
+  await page.getByRole("button", { name: "一覧", exact: true }).click();
+  await expect(
+    page.locator(".ledger-table tbody tr", { hasText: "あなたの写真" }),
+  ).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+test("opens with the space intro and lets visitors skip it", async ({ page }) => {
+  const errors = watchErrors(page);
+  await serveCommonsLocally(page);
+  await page.goto("/?seed=2&limit=6&workers=2");
+  const skip = page.getByRole("button", { name: "オープニングをスキップ" });
+  await expect(skip).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("canvas.intro-canvas")).toHaveCount(1);
+  await skip.click();
+  await expect(page.locator("canvas.intro-canvas")).toHaveCount(0, {
+    timeout: 10_000,
+  });
+  await expect(headline(page)).toHaveAccessibleName(/並べ終えた写真/, {
+    timeout: 150_000,
+  });
+  expect(errors).toEqual([]);
 });

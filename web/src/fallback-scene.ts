@@ -19,6 +19,7 @@ export function createFallbackScene(capacity: number): DeskScene {
       return null;
     },
     setReducedMotion() {},
+    setViewInsets() {},
     on() {
       return () => {};
     },
