@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "name": "kururi-ai-v2-nano",
+  "models": [
+    {
+      "model_name": "mobilenetv4_conv_small.e2400_r224_in1k",
+      "repository": "timm/mobilenetv4_conv_small.e2400_r224_in1k",
+      "revision": "331fb803779522b685cf942e15f914fb6741c1eb",
+      "model_card_url": "https://huggingface.co/timm/mobilenetv4_conv_small.e2400_r224_in1k/blob/331fb803779522b685cf942e15f914fb6741c1eb/README.md",
+      "license_declared_by_upstream": "apache-2.0",
+      "pretraining_dataset": "ImageNet-1k",
+      "upstream_author": "Ross Wightman / timm",
+      "files": {
+        "model.safetensors": {
+          "sha256": "7a7102ec18f62bbfb555b6fe829bbb5af749516b84174926c29ffdfdfc03aec4",
+          "bytes": 15223016
+        },
+        "config.json": {
+          "sha256": "ecd20bcf1287aaa88129a736d188904d0b134c96e152b55b241be895657fe41a",
+          "bytes": 681
+        },
+        "README.md": {
+          "sha256": "864651a7a9c0457023728da202cb1119abf3fa0872ded374ba736efde6454eb7",
+          "bytes": 13066
+        }
+      }
+    },
+    {
+      "model_name": "mobilenetv4_conv_medium.e500_r224_in1k",
+      "repository": "timm/mobilenetv4_conv_medium.e500_r224_in1k",
+      "revision": "02a09fbfb82b289e871ba8255f9da58c056fb13b",
+      "model_card_url": "https://huggingface.co/timm/mobilenetv4_conv_medium.e500_r224_in1k/blob/02a09fbfb82b289e871ba8255f9da58c056fb13b/README.md",
+      "license_declared_by_upstream": "apache-2.0",
+      "pretraining_dataset": "ImageNet-1k",
+      "upstream_author": "Ross Wightman / timm",
+      "files": {
+        "model.safetensors": {
+          "sha256": "10f9f8057d574f71d22c52d31cadab8af0bc325841fd93939c86d45d20998cad",
+          "bytes": 39179184
+        },
+        "config.json": {
+          "sha256": "2006f6d5124ec4e57ad54ea5e6053006d0ff8f91f0a1e192190e5b62f2e67c86",
+          "bytes": 679
+        },
+        "README.md": {
+          "sha256": "29765ac1e5c1bcd84c96c17b7383be4bd75f0ad96c575f6bac30fcbf7bd3baf7",
+          "bytes": 13067
+        }
+      }
+    }
+  ],
+  "modifications": [
+    "four-class orientation heads",
+    "private and public upright training",
+    "QDQ INT8 quantization"
+  ],
+  "license": "Apache-2.0",
+  "source_commit": "main@2026-10-21"
+}

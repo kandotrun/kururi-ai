@@ -1,0 +1,24 @@
+{
+  "name": "kururi-ai-web-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/copy-assets.mjs",
+    "predev": "npm run assets",
+    "dev": "vite",
+    "build": "node scripts/copy-assets.mjs && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "pretest": "npm run assets",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/newsreader": "5.2.8",
+    "onnxruntime-web": "1.23.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

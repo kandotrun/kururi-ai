@@ -110,6 +110,21 @@ v6-v9 iterations. The final shipped general models remain the validation-selecte
 v5 models; the public Wikimedia/iNaturalist candidates did not replace them.
 The Small-224 cascade includes 958 synthetic UI training fixtures.
 
+## Browser v2-nano experiment
+
+A separate browser model was trained from MobileNetV4 Conv Small and Conv
+Medium with QDQ INT8 quantization. The combined artifacts are 11.9MB.
+
+| Metric | v2-nano |
+|---|---:|
+| Validation rotations | 400/428 (93.46%) |
+| Validation scene-group macro | 87.82% |
+| Frozen test rotations | 324/396 (81.82%) |
+| Frozen test scene-group macro | 75.27% |
+
+The browser uses four aligned views and is intended for interactive
+demonstration. It does not replace the full Rust v2.0.0 accuracy result.
+
 ## Reproducibility and privacy
 
 The release includes:
