@@ -114,7 +114,7 @@ app.innerHTML = `
       <article>
         <p class="note-number">81.82%</p>
         <h3>未使用テスト</h3>
-        <p>99枚×4方向 = 396条件。v1より高速、フルv2より軽量なデモ用モデルです。</p>
+        <p>99枚×4方向 = 396条件。フルv2より軽量なブラウザ用モデルです。</p>
       </article>
       <article>
         <p class="note-number">11.9MB</p>
