@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "release": "v2-nano-demo.2",
+  "name": "kururi-ai-v2-nano",
+  "architecture": "MobileNetV4 Conv Small + Medium ensemble",
+  "input_shape": [
+    1,
+    3,
+    224,
+    224
+  ],
+  "views": 4,
+  "models": [
+    {
+      "file": "kururi-ai-v2-nano-small.onnx",
+      "bytes": 2788640,
+      "sha256": "688e71f2a3cc25a92a52fb080eb8f4d2e280d7fc55c35be2de6feb08b62d3022",
+      "weight": 0.18
+    },
+    {
+      "file": "kururi-ai-v2-nano.onnx",
+      "bytes": 9119801,
+      "sha256": "0ffdb1b6a42fdd0353853bf0cb99ac1311b752850ff030fcd68fdb4128ab04d0",
+      "weight": 0.82
+    }
+  ],
+  "total_model_bytes": 11908441,
+  "class_order_correction_cw": [
+    0,
+    90,
+    180,
+    270
+  ],
+  "preprocess": {
+    "color": "RGB",
+    "resize": "whole image to 224x224",
+    "interpolation": "bilinear",
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "layout": "NCHW"
+  },
+  "quantization": "QDQ static INT8, calibrated on 100 training images",
+  "validation": {
+    "correct": 400,
+    "total": 428,
+    "accuracy": 0.9345794392523364,
+    "group_macro_accuracy": 0.8782312925170068
+  },
+  "test": {
+    "correct": 324,
+    "total": 396,
+    "accuracy": 0.8181818181818182,
+    "group_macro_accuracy": 0.7526697177726926
+  },
+  "license": "Apache-2.0 derivative",
+  "privacy": "Images stay in the browser; no upload endpoint."
+}

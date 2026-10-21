@@ -31,10 +31,15 @@ Python/MPS path; v2 uses the Rust/ONNX CPU path.
 The release is available on
 [GitHub Releases v2.0.0](https://github.com/kandotrun/kururi-ai/releases/tag/v2.0.0).
 
+- [Browser v2-nano demo](https://kandotrun.github.io/kururi-ai/)
 - `kururi-ai-v2.0.0-macos-arm64.tar.gz`
 - `kururi-ai-v2.0.0-linux-x86_64.tar.gz`
 - `kururi-ai-v2.0.0-model.tar.gz`
 - `SHA256SUMS`
+
+The browser demo runs an approximately 11.9MB Nano ensemble with ONNX Runtime
+Web/WASM and shows batch correction without uploading images. Nano is a separate
+demo model at 81.82% on its frozen test, distinct from the full v2.0.0 result.
 
 Read [the model card](MODEL_CARD.md) and
 [benchmark report](BENCHMARK_REPORT.md) for the 176-image test set, provisional
