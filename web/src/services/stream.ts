@@ -1,0 +1,612 @@
+import type {
+  DeskScene,
+  ImageLoader,
+  InferencePool,
+  LoadedImage,
+  PhotoSource,
+  Prediction,
+  Quarter,
+  Store,
+  Stream,
+  StreamStatus,
+} from "../contracts";
+import type { Random } from "../core/random";
+import { pickSimulated } from "../core/rotation";
+import { RateLimitedError } from "./image-loader";
+
+export interface StreamLimits {
+  maxPile: number;
+  maxLoading: number;
+  maxPrints: number;
+  openingBatch: number;
+  openingHoldMs: number;
+}
+
+export interface StreamDeps {
+  sources: readonly PhotoSource[];
+  makeUserSource: (file: File, id: string) => PhotoSource;
+  loader: ImageLoader;
+  pool: InferencePool;
+  store: Store;
+  scene: Pick<
+    DeskScene,
+    "addPrint" | "setScanning" | "decide" | "place" | "focus" | "removePrint"
+  >;
+  random: Random;
+  now: () => number;
+  wait: (ms: number) => Promise<void>;
+  simulateUser: () => boolean;
+  reducedMotion: () => boolean;
+  limits: StreamLimits;
+  onStatus: (status: StreamStatus) => void;
+  onNotice: (message: string | null) => void;
+}
+
+export const OFFLINE_NOTICE =
+  "Wikimedia Commons に接続できませんでした。自分の写真は並べられます。";
+export const DESK_FULL_NOTICE =
+  "机がいっぱいなので、これ以上は並べられません。";
+
+const OFFLINE_AFTER_FAILURES = 8;
+const OFFLINE_PROBE_MS = 5_000;
+const IDLE_POLL_MS = 250;
+const DECISION_BEAT_MS = 280;
+const RELEASE_FOCUS_MS = 1_500;
+const USER_RESERVE = 64;
+const MIN_RATE_PAUSE_MS = 1_000;
+const MAX_RATE_PAUSE_MS = 60_000;
+const NO_SLOT = "並べる場所が決まりませんでした";
+
+type OpeningPhase = "gathering" | "holding" | "released";
+
+interface Pending {
+  source: PhotoSource;
+  simulated: Quarter;
+  order: number;
+  added: boolean;
+}
+
+interface Landed {
+  source: PhotoSource;
+  blob: Blob;
+  simulated: Quarter;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isUser(source: PhotoSource): boolean {
+  return source.kind === "user";
+}
+
+export function createStream(deps: StreamDeps): Stream {
+  const { limits, store, scene, pool } = deps;
+  const reserve = Math.min(USER_RESERVE, Math.floor(limits.maxPrints / 10));
+  const remaining = deps.sources.slice(
+    0,
+    Math.max(0, Math.min(deps.sources.length, limits.maxPrints - reserve)),
+  );
+  const plannedSources = remaining.length;
+  const takenIds = new Set(deps.sources.map((source) => source.id));
+  const userQueue: Pending[] = [];
+  const retryQueue: Pending[] = [];
+  const waiting: Landed[] = [];
+  const controllers = new Set<AbortController>();
+  let userAccepted = 0;
+  let userCounter = 0;
+  let pendingOrder = 0;
+  let started = false;
+  let paused = false;
+  let disposed = false;
+  let poolReady = false;
+  let opening: OpeningPhase = "gathering";
+  let landedCount = 0;
+  let active = 0;
+  let loading = 0;
+  let commonsLoading = 0;
+  let landing = 0;
+  let scanning = 0;
+  let commonsFailures = 0;
+  let commonsResumeAt = Number.NEGATIVE_INFINITY;
+  let resumeScheduled = false;
+  let offline = false;
+  let probing = false;
+  let polling = false;
+  let pumping = false;
+  let pumpAgain = false;
+  let focused: string | null = null;
+  let status: StreamStatus | null = null;
+
+  const total = () => plannedSources + userAccepted;
+
+  function simulatedFor(source: PhotoSource): Quarter {
+    if (source.kind === "sample") {
+      return 0;
+    }
+    if (source.kind === "user") {
+      return deps.simulateUser() ? pickSimulated(deps.random) : 0;
+    }
+    return pickSimulated(deps.random);
+  }
+
+  function pending(source: PhotoSource): Pending {
+    pendingOrder += 1;
+    return {
+      source,
+      simulated: simulatedFor(source),
+      order: pendingOrder,
+      added: false,
+    };
+  }
+
+  function quietly(action: () => void): void {
+    try {
+      action();
+    } catch {
+      return;
+    }
+  }
+
+  function finished(): boolean {
+    return active === 0 && userQueue.length === 0 && remaining.length === 0;
+  }
+
+  function refreshStatus(): void {
+    const next: StreamStatus = paused
+      ? "paused"
+      : finished()
+        ? "finished"
+        : offline
+          ? "offline"
+          : "running";
+    if (next !== status) {
+      status = next;
+      deps.onStatus(next);
+    }
+  }
+
+  function commonsPaused(): boolean {
+    return deps.now() < commonsResumeAt;
+  }
+
+  function commonsBlocked(): boolean {
+    return commonsPaused() || (offline && (probing || commonsLoading > 0));
+  }
+
+  function nextRemainingIndex(blocked: boolean): number {
+    if (blocked) {
+      return remaining.findIndex((source) => source.kind !== "commons");
+    }
+    return remaining.length > 0 ? 0 : -1;
+  }
+
+  function hasLoadable(): boolean {
+    if (userQueue.length > 0) {
+      return true;
+    }
+    const blocked = commonsBlocked();
+    return (
+      (!blocked && retryQueue.length > 0) || nextRemainingIndex(blocked) >= 0
+    );
+  }
+
+  function nextPending(): Pending | null {
+    const user = userQueue.shift();
+    if (user) {
+      return user;
+    }
+    const blocked = commonsBlocked();
+    if (!blocked) {
+      const retry = retryQueue.shift();
+      if (retry) {
+        return retry;
+      }
+    }
+    const index = nextRemainingIndex(blocked);
+    if (index < 0) {
+      return null;
+    }
+    return pending(remaining.splice(index, 1)[0]!);
+  }
+
+  function requeue(entry: Pending): void {
+    const index = retryQueue.findIndex((other) => other.order > entry.order);
+    retryQueue.splice(index < 0 ? retryQueue.length : index, 0, entry);
+  }
+
+  function scheduleResume(): void {
+    if (resumeScheduled) {
+      return;
+    }
+    const delay = commonsResumeAt - deps.now();
+    if (delay <= 0) {
+      return;
+    }
+    resumeScheduled = true;
+    void deps.wait(delay).then(() => {
+      resumeScheduled = false;
+      scheduleResume();
+      pump();
+    });
+  }
+
+  function pauseCommons(retryAfterMs: number): void {
+    const delay = Math.min(
+      MAX_RATE_PAUSE_MS,
+      Math.max(MIN_RATE_PAUSE_MS, retryAfterMs),
+    );
+    commonsResumeAt = Math.max(commonsResumeAt, deps.now() + delay);
+    scheduleResume();
+  }
+
+  function probeLater(): void {
+    if (probing) {
+      return;
+    }
+    probing = true;
+    void deps.wait(OFFLINE_PROBE_MS).then(() => {
+      probing = false;
+      pump();
+    });
+  }
+
+  function pollLater(): void {
+    if (polling) {
+      return;
+    }
+    polling = true;
+    void deps.wait(IDLE_POLL_MS).then(() => {
+      polling = false;
+      pump();
+    });
+  }
+
+  function noteCommons(source: PhotoSource, ok: boolean): void {
+    if (source.kind !== "commons") {
+      return;
+    }
+    if (ok) {
+      commonsFailures = 0;
+      if (offline) {
+        offline = false;
+        deps.onNotice(null);
+      }
+      return;
+    }
+    commonsFailures += 1;
+    if (!offline && commonsFailures >= OFFLINE_AFTER_FAILURES) {
+      offline = true;
+      deps.onNotice(OFFLINE_NOTICE);
+    }
+    if (offline) {
+      probeLater();
+    }
+  }
+
+  function starved(): boolean {
+    return loading === 0 && landing === 0 && !hasLoadable();
+  }
+
+  function updateOpening(): void {
+    if (opening !== "gathering" || !poolReady) {
+      return;
+    }
+    if (landedCount < limits.openingBatch && !starved()) {
+      return;
+    }
+    opening = "holding";
+    void deps.wait(limits.openingHoldMs).then(() => {
+      opening = "released";
+      pump();
+    });
+  }
+
+  function pileLimit(): number {
+    return opening === "released"
+      ? limits.maxPile
+      : Math.max(limits.maxPile, limits.openingBatch);
+  }
+
+  function releaseFocus(id: string): void {
+    if (focused === id) {
+      focused = null;
+      quietly(() => scene.focus(null));
+    }
+  }
+
+  function stopLoading(source: PhotoSource): void {
+    loading -= 1;
+    if (source.kind === "commons") {
+      commonsLoading -= 1;
+    }
+  }
+
+  function fail(source: PhotoSource, error: unknown): void {
+    active -= 1;
+    store.dispatch({ type: "failed", id: source.id, error: messageOf(error) });
+    releaseFocus(source.id);
+    pump();
+  }
+
+  function failPrint(source: PhotoSource, error: unknown): void {
+    quietly(() => scene.removePrint(source.id));
+    fail(source, error);
+  }
+
+  async function runLoad(entry: Pending): Promise<void> {
+    const { source, simulated } = entry;
+    const controller = new AbortController();
+    controllers.add(controller);
+    let image: LoadedImage;
+    try {
+      image = await deps.loader.load(source, controller.signal);
+    } catch (error) {
+      controllers.delete(controller);
+      if (disposed) {
+        return;
+      }
+      stopLoading(source);
+      if (error instanceof RateLimitedError && source.kind === "commons") {
+        requeue(entry);
+        pauseCommons(error.retryAfterMs);
+        pump();
+        return;
+      }
+      noteCommons(source, false);
+      fail(source, error);
+      return;
+    }
+    controllers.delete(controller);
+    if (disposed) {
+      image.bitmap.close();
+      return;
+    }
+    stopLoading(source);
+    noteCommons(source, true);
+    store.dispatch({ type: "loaded", id: source.id, aspect: image.aspect });
+    const slot = store.getState().records.get(source.id)?.slot ?? null;
+    if (slot === null) {
+      image.bitmap.close();
+      fail(source, new Error(NO_SLOT));
+      return;
+    }
+    landing += 1;
+    pump();
+    try {
+      await scene.addPrint({
+        id: source.id,
+        slot,
+        aspect: image.aspect,
+        simulated,
+        image: image.bitmap,
+        emphasis: isUser(source),
+      });
+    } catch (error) {
+      if (disposed) {
+        return;
+      }
+      landing -= 1;
+      failPrint(source, error);
+      return;
+    }
+    if (disposed) {
+      return;
+    }
+    landing -= 1;
+    landedCount += 1;
+    store.dispatch({ type: "landed", id: source.id });
+    if (isUser(source)) {
+      focused = source.id;
+      quietly(() => scene.focus(source.id));
+    }
+    waiting.push({ source, blob: image.blob, simulated });
+    pump();
+  }
+
+  async function runScan({ source, blob, simulated }: Landed): Promise<void> {
+    const id = source.id;
+    scanning += 1;
+    store.dispatch({ type: "scanStarted", id });
+    let prediction: Prediction;
+    try {
+      scene.setScanning(id, true);
+      prediction = await pool.infer(id, blob, simulated);
+    } catch (error) {
+      if (disposed) {
+        return;
+      }
+      scanning -= 1;
+      quietly(() => scene.setScanning(id, false));
+      failPrint(source, error);
+      return;
+    }
+    if (disposed) {
+      return;
+    }
+    scanning -= 1;
+    store.dispatch({ type: "decided", id, prediction, at: deps.now() });
+    quietly(() => scene.setScanning(id, false));
+    pump();
+    try {
+      scene.decide(id, prediction.correction);
+      const beat = deps.reducedMotion() ? 0 : DECISION_BEAT_MS;
+      if (beat > 0) {
+        await deps.wait(beat);
+      }
+      if (disposed) {
+        return;
+      }
+      const slot = store.getState().records.get(id)?.slot;
+      if (slot === null || slot === undefined) {
+        throw new Error(NO_SLOT);
+      }
+      await scene.place(id, slot);
+    } catch (error) {
+      if (!disposed) {
+        failPrint(source, error);
+      }
+      return;
+    }
+    if (disposed) {
+      return;
+    }
+    active -= 1;
+    store.dispatch({ type: "placed", id });
+    pump();
+    if (isUser(source)) {
+      await deps.wait(RELEASE_FOCUS_MS);
+      if (!disposed) {
+        releaseFocus(id);
+      }
+    }
+  }
+
+  function startScans(): void {
+    if (opening !== "released") {
+      return;
+    }
+    while (waiting.length > 0 && scanning < pool.size && pool.idleCount() > 0) {
+      const userIndex = waiting.findIndex((entry) => isUser(entry.source));
+      const entry = waiting.splice(Math.max(0, userIndex), 1)[0]!;
+      void runScan(entry);
+    }
+  }
+
+  function startLoads(): void {
+    while (
+      loading < limits.maxLoading &&
+      loading + landing + waiting.length < pileLimit()
+    ) {
+      const next = nextPending();
+      if (!next) {
+        return;
+      }
+      loading += 1;
+      if (next.source.kind === "commons") {
+        commonsLoading += 1;
+      }
+      if (!next.added) {
+        next.added = true;
+        active += 1;
+        store.dispatch({
+          type: "added",
+          source: next.source,
+          simulated: next.simulated,
+          at: deps.now(),
+        });
+      }
+      void runLoad(next);
+    }
+  }
+
+  function step(): void {
+    if (!paused) {
+      updateOpening();
+      startScans();
+      startLoads();
+      if (waiting.length > 0 && scanning === 0 && pool.idleCount() === 0) {
+        pollLater();
+      }
+    }
+    refreshStatus();
+  }
+
+  function pump(): void {
+    if (!started || disposed) {
+      return;
+    }
+    if (pumping) {
+      pumpAgain = true;
+      return;
+    }
+    pumping = true;
+    try {
+      do {
+        pumpAgain = false;
+        step();
+      } while (pumpAgain && !disposed);
+    } finally {
+      pumping = false;
+    }
+  }
+
+  function nextUserId(): string {
+    let id: string;
+    do {
+      userCounter += 1;
+      id = `user-${userCounter}`;
+    } while (takenIds.has(id) || store.getState().records.has(id));
+    takenIds.add(id);
+    return id;
+  }
+
+  return {
+    get paused() {
+      return paused;
+    },
+    start() {
+      if (started || disposed) {
+        return;
+      }
+      started = true;
+      store.dispatch({ type: "totalChanged", total: total() });
+      void pool.ready.then(
+        () => {
+          poolReady = true;
+          pump();
+        },
+        () => {},
+      );
+      pump();
+    },
+    pause() {
+      if (disposed || paused) {
+        return;
+      }
+      paused = true;
+      pump();
+    },
+    resume() {
+      if (disposed || !paused) {
+        return;
+      }
+      paused = false;
+      pump();
+    },
+    addUserFiles(files) {
+      if (disposed || files.length === 0) {
+        return;
+      }
+      const room = Math.max(
+        0,
+        limits.maxPrints - plannedSources - userAccepted,
+      );
+      const accepted = files.slice(0, room);
+      for (const file of accepted) {
+        userQueue.push(pending(deps.makeUserSource(file, nextUserId())));
+      }
+      userAccepted += accepted.length;
+      if (accepted.length < files.length) {
+        deps.onNotice(DESK_FULL_NOTICE);
+      }
+      if (accepted.length > 0) {
+        store.dispatch({ type: "totalChanged", total: total() });
+      }
+      pump();
+    },
+    dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      for (const controller of controllers) {
+        controller.abort();
+      }
+      controllers.clear();
+      waiting.length = 0;
+      userQueue.length = 0;
+      retryQueue.length = 0;
+    },
+  };
+}

@@ -22,7 +22,7 @@ points with a 95% interval of +5.24 to +17.95.
 ## Changes
 
 - Added a separate 11.9MB MobileNetV4 v2-nano WASM demo at
-  https://kandotrun.github.io/kururi-ai/
+  https://kururi-ai.2-38.com/
 - Switched to Rust with ONNX Runtime 1.31 CPU execution.
 - Added ConvNeXt-Base 224 and ConvNeXt-Small 288 general models.
 - Added a validation-selected Small-224 cascade for low-margin decisions.

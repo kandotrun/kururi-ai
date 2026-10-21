@@ -1,6 +1,6 @@
 import * as ort from "onnxruntime-web/wasm";
 import type {
-  InitRequest,
+  NanoInitRequest,
   ProcessRequest,
   WorkerRequest,
   WorkerResponse,
@@ -45,7 +45,7 @@ function rotateChw(data: Float32Array, quartersCw: number): Float32Array {
   return result;
 }
 
-async function initialize(request: InitRequest): Promise<void> {
+async function initialize(request: NanoInitRequest): Promise<void> {
   const started = performance.now();
   ort.env.wasm.wasmPaths = request.wasmBaseUrl;
   ort.env.wasm.numThreads = 1;
@@ -156,6 +156,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
   try {
     if (request.type === "init") {
+      if (request.engine !== "nano") {
+        throw new Error("このワーカーは v2-nano 専用です");
+      }
       await initialize(request);
     } else {
       await processImage(request);

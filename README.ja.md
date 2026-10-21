@@ -31,15 +31,17 @@ Rust/ONNX CLIです。v2では3つのConvNeXtモデルを統合し、通常は2�
 配布物は [GitHub Releases v2.0.0](https://github.com/kandotrun/kururi-ai/releases/tag/v2.0.0)
 にあります。
 
-- [ブラウザで試せるv2-nanoデモ](https://kandotrun.github.io/kururi-ai/)
+- [ブラウザで試せるv2-nanoデモ](https://kururi-ai.2-38.com/)
 - `kururi-ai-v2.0.0-macos-arm64.tar.gz`
 - `kururi-ai-v2.0.0-linux-x86_64.tar.gz`
 - `kururi-ai-v2.0.0-model.tar.gz`（3モデル共通）
 - `SHA256SUMS`
 
-Webデモは約11.9MBの軽量NanoモデルをONNX Runtime Web/WASMで実行し、画像を
-外部送信せずに複数写真の補正結果を並べます。Nanoは未使用テスト81.82%で、
-フルv2.0.0の99.43%とは別のデモ用モデルです。
+Webデモは約11.9MBの軽量NanoモデルをONNX Runtime Web/WASMで実行します。
+3Dの作業机にWikimedia Commonsの特選写真を数千枚わざと回転させて流し込み、
+ブラウザの中で向きを判定して並べ直します。自分の写真もドロップでき、外部へは
+送信しません。Nanoは未使用テスト81.82%で、フルv2.0.0の99.43%とは別の
+デモ用モデルです。
 
 評価データ、ラベル、速度条件、モデルハッシュ、不確実性と残る制約は
 [モデルカード](MODEL_CARD.md)と

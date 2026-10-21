@@ -9,6 +9,15 @@ export interface Attribution {
   pageUrl: string;
 }
 
+export interface GeoPoint {
+  lat: number;
+  lon: number;
+}
+
+export interface GeoPlace extends GeoPoint {
+  country: string | null;
+}
+
 export interface PhotoSource {
   id: string;
   kind: PhotoKind;
@@ -19,6 +28,7 @@ export interface PhotoSource {
   file: File | null;
   attribution: Attribution | null;
   uprightFix: Quarter | null;
+  location?: GeoPlace | null;
 }
 
 export type PhotoPhase =
@@ -90,6 +100,7 @@ export interface DeskStats {
   perSecond: number | null;
   medianMs: number | null;
   failed: number;
+  crooked: number;
 }
 
 export interface DeskPose {
@@ -116,6 +127,7 @@ export interface CommonsEntry {
   license: number;
   topic: string;
   thumbName: string | null;
+  location?: GeoPlace | null;
 }
 
 export interface CommonsManifest {
@@ -159,6 +171,7 @@ export interface ScreenPoint {
 
 export interface NewPrint {
   id: string;
+  slot: number;
   aspect: number;
   simulated: Quarter;
   image: ImageBitmap;
@@ -172,6 +185,7 @@ export interface DeskSceneEvents {
 
 export interface DeskScene {
   readonly capacity: number;
+  readonly tileSize: number;
   start(): void;
   addPrint(print: NewPrint): Promise<void>;
   setScanning(id: string, scanning: boolean): void;
@@ -180,6 +194,7 @@ export interface DeskScene {
   removePrint(id: string): void;
   scatterAll(): Promise<void>;
   focus(id: string | null): void;
+  select(id: string | null): void;
   screenPosition(id: string): ScreenPoint | null;
   setReducedMotion(reduced: boolean): void;
   on<K extends keyof DeskSceneEvents>(
@@ -192,6 +207,19 @@ export interface DeskScene {
 export interface DeskSceneOptions {
   reducedMotion: boolean;
   lowPower: boolean;
+}
+
+export type ModelId = "nano" | "full";
+
+export interface ModelOption {
+  id: ModelId;
+  label: string;
+  version: string;
+  sizeBytes: number;
+  testAccuracy: number;
+  needsWebGPU: boolean;
+  available: boolean;
+  unavailableReason: string | null;
 }
 
 export type StreamStatus =
@@ -207,6 +235,7 @@ export interface OverlayHandlers {
   scatter(): void;
   setSimulateUser(enabled: boolean): void;
   selectRecord(id: string | null): void;
+  selectModel(id: ModelId): void;
 }
 
 export interface Overlay {
@@ -221,6 +250,7 @@ export interface Overlay {
   notice(message: string | null): void;
   webglUnavailable(): void;
   simulateUser(): boolean;
+  setModels(current: ModelId, options: readonly ModelOption[]): void;
 }
 
 export interface Stream {

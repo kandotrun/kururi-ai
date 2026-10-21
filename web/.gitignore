@@ -3,3 +3,5 @@ public/ort/
 dist/
 test-results/
 playwright-report/
+public/full-local
+*.local

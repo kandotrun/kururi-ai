@@ -1,0 +1,10 @@
+id: no-explicit-any
+valid:
+  - "const value: unknown = 1;"
+  - "function read(input: string): number { return input.length; }"
+  - "const any = 1;"
+invalid:
+  - "const value: any = 1;"
+  - "function read(input: any): void {}"
+  - "const list: Array<any> = [];"
+  - "const value = input as any;"

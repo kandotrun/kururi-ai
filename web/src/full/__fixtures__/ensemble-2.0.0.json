@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "release": "2.0.0",
+  "class_order_correction_cw": [
+    0,
+    90,
+    180,
+    270
+  ],
+  "preprocess": "v2-whole224-bilinear-imagenet",
+  "aggregation": "Align each four-view softmax back to input classes, average per model, then weighted-average invoked models.",
+  "general_models": [
+    {
+      "name": "convnext-base-224",
+      "role": "general",
+      "backbone": "convnext_base.fb_in22k_ft_in1k",
+      "input_size": 224,
+      "batch_size": 4,
+      "views": 4,
+      "weight": 0.5,
+      "fallback_rule": null,
+      "graph": {
+        "file": "convnext-base-224.onnx",
+        "bytes": 1390721,
+        "sha256": "c6b208e7d60733a0665b889e91f1f2a5aa91de2904e011e868d6d788b2935f42"
+      },
+      "external_data": {
+        "file": "convnext-base-224.onnx.data",
+        "bytes": 350355456,
+        "sha256": "edd2c08881fcee5407c48bbfcfabd0018ace8cf0a63b7883a27f661b6292c833"
+      }
+    },
+    {
+      "name": "convnext-small-288",
+      "role": "general",
+      "backbone": "convnext_small.fb_in22k_ft_in1k",
+      "input_size": 288,
+      "batch_size": 4,
+      "views": 4,
+      "weight": 0.4,
+      "fallback_rule": null,
+      "graph": {
+        "file": "convnext-small-288.onnx",
+        "bytes": 1390842,
+        "sha256": "3f81e598475bd51f0a02581d21051146c737fdb324e1de48b139a7df23563cdc"
+      },
+      "external_data": {
+        "file": "convnext-small-288.onnx.data",
+        "bytes": 197918720,
+        "sha256": "983e83a68323b0785acaf4abd4a62f1d04c497521e86ed4e296409fd8f1f07f7"
+      }
+    }
+  ],
+  "fallback": {
+    "name": "convnext-small-224",
+    "role": "fallback",
+    "backbone": "convnext_small.fb_in22k_ft_in1k",
+    "input_size": 224,
+    "batch_size": 4,
+    "views": 4,
+    "weight": 0.1,
+    "fallback_rule": "Use only when normalized top1-top2 margin is below 0.033333333.",
+    "graph": {
+      "file": "convnext-small-224.onnx",
+      "bytes": 1390842,
+      "sha256": "343f9ff1394725f4f69b37aabf6cc0de915a074cd6e54e719825c5d5689d4cea"
+    },
+    "external_data": {
+      "file": "convnext-small-224.onnx.data",
+      "bytes": 197918720,
+      "sha256": "5321c288da8eed5f46a8eff8c9272252622adb4be5391c3ab5f70452976d5192"
+    }
+  },
+  "selection": {
+    "validation_correct": 424,
+    "validation_total": 428,
+    "validation_accuracy": 0.9906542056074766,
+    "frozen_test_correct": 700,
+    "frozen_test_total": 704,
+    "frozen_test_accuracy": 0.9943181818181818,
+    "v1_frozen_test_correct": 626
+  },
+  "runtime": {
+    "onnxruntime": "1.31.0",
+    "ort_crate": "2.0.0-rc.15",
+    "parallel_general_models": true,
+    "default_total_threads": 12
+  },
+  "privacy": "Private source photographs, paths, and per-photo predictions are not included.",
+  "source_commit": "63152c151380d7e56cb62a51f5e6ee02a93da322"
+}

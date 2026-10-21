@@ -1,0 +1,11 @@
+id: no-comments
+language: TypeScript
+severity: error
+rule:
+  kind: comment
+message: Do not write code comments in this repository.
+note: AGENTS.md forbids comments. Express intent through names, types and tests.
+files:
+  - "src/**/*.ts"
+  - "tests/**/*.ts"
+  - "dev/**/*.ts"

@@ -2,14 +2,22 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       name="description"
-      content="くるりAI v2-nano。画像を外部送信せず、ブラウザ内で写真の向きをまとめて補正するデモ。"
+      content="Wikimedia Commons の写真をわざと横向きや逆さまにして机に並べ、くるりAI がブラウザの中で1枚ずつ正しい向きに直すデモです。自分の写真も、送信せずに試せます。"
     />
-    <title>くるりAI v2-nano light table</title>
+    <meta name="theme-color" content="#173A30" />
+    <title>くるりAI 写真の向きを直すデモ</title>
   </head>
-  <body>
+  <body style="margin: 0; background: #173a30">
+    <noscript>
+      <p
+        style="max-width: 32em; margin: 0 auto; padding: 48px 20px; color: #e9f0ec; font: 15px/1.8 'Hiragino Sans', 'Noto Sans JP', sans-serif"
+      >
+        このデモは JavaScript で動きます。ブラウザの設定で JavaScript を有効にしてから、もう一度読み込んでください。
+      </p>
+    </noscript>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

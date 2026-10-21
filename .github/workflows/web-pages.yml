@@ -18,10 +18,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pages: write
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,19 +32,59 @@ jobs:
       - name: Install Chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+      - name: Unit tests
+        working-directory: web
+        run: npm run test:unit
       - name: Build
         working-directory: web
         run: npm run build
       - name: Browser test
         working-directory: web
         run: npm test
-      - name: Upload Pages artifact
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          path: web/dist
+          name: playwright-results
+          path: web/test-results
+          retention-days: 7
 
-  deploy:
+  deploy-cloudflare:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: cloudflare
+      url: https://kururi-ai.2-38.com/
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build
+        working-directory: web
+        run: npm run build
+      - name: Deploy to kururi-ai.2-38.com
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: web
+        run: npx wrangler deploy
+      - name: Explain skipped deploy
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::notice::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets to deploy to Cloudflare."
+
+  pages-redirect:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-24.04
@@ -58,6 +95,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Upload redirect page
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/redirect
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

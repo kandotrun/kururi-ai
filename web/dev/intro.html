@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>くるりAI オープニング検証</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #173a30;
+        overflow: hidden;
+      }
+
+      #stage {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+      }
+
+      #desk {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background-color: #2b5a4a;
+        background-image:
+          linear-gradient(rgb(141 184 166 / 0.2) 1px, transparent 1px),
+          linear-gradient(90deg, rgb(141 184 166 / 0.2) 1px, transparent 1px),
+          linear-gradient(rgb(141 184 166 / 0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgb(141 184 166 / 0.07) 1px, transparent 1px);
+        background-size:
+          96px 96px,
+          96px 96px,
+          9.6px 9.6px,
+          9.6px 9.6px;
+        background-position: center;
+      }
+
+      #hud {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        z-index: 3;
+        padding: 8px 10px;
+        font: 12px/1.5 "Hiragino Sans", system-ui, sans-serif;
+        font-variant-numeric: tabular-nums;
+        color: #e9f0ec;
+        background: rgb(23 58 48 / 0.82);
+        border-radius: 2px;
+        white-space: pre;
+        pointer-events: none;
+      }
+
+      #hud[hidden] {
+        display: none;
+      }
+
+      #skip {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 3;
+        font: 14px "Hiragino Sans", system-ui, sans-serif;
+        color: #e9f0ec;
+        background: transparent;
+        border: 1px solid rgb(233 240 236 / 0.5);
+        border-radius: 2px;
+        padding: 6px 12px;
+      }
+
+      #skip[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"><div id="desk"></div></div>
+    <div id="hud" hidden></div>
+    <button id="skip" type="button" hidden>スキップ</button>
+    <script type="module" src="./intro-harness.ts"></script>
+  </body>
+</html>

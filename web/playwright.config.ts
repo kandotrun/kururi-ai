@@ -5,10 +5,13 @@ export default defineConfig({
   timeout: 180_000,
   use: {
     baseURL: "http://127.0.0.1:4173",
-    viewport: { width: 1440, height: 1100 },
+    viewport: { width: 1440, height: 900 },
+    launchOptions: {
+      args: ["--enable-unsafe-swiftshader"],
+    },
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
+    command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: true,
     timeout: 120_000,

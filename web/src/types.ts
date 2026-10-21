@@ -1,8 +1,18 @@
-export interface InitRequest {
+export interface NanoInitRequest {
   type: "init";
+  engine: "nano";
   models: Array<{ bytes: ArrayBuffer; weight: number }>;
   wasmBaseUrl: string;
 }
+
+export interface FullInitRequest {
+  type: "init";
+  engine: "full";
+  baseUrl: string;
+  wasmBaseUrl: string;
+}
+
+export type InitRequest = NanoInitRequest | FullInitRequest;
 
 export interface ProcessRequest {
   type: "process";
@@ -12,6 +22,12 @@ export interface ProcessRequest {
 }
 
 export type WorkerRequest = InitRequest | ProcessRequest;
+
+export interface ProgressMessage {
+  type: "load-progress";
+  loaded: number;
+  total: number;
+}
 
 export interface ReadyMessage {
   type: "ready";
@@ -33,4 +49,8 @@ export interface ErrorMessage {
   message: string;
 }
 
-export type WorkerResponse = ReadyMessage | ResultMessage | ErrorMessage;
+export type WorkerResponse =
+  | ProgressMessage
+  | ReadyMessage
+  | ResultMessage
+  | ErrorMessage;
