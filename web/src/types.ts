@@ -1,6 +1,6 @@
 export interface InitRequest {
   type: "init";
-  models: Array<{ url: string; weight: number }>;
+  models: Array<{ bytes: ArrayBuffer; weight: number }>;
   wasmBaseUrl: string;
 }
 
@@ -12,14 +12,6 @@ export interface ProcessRequest {
 }
 
 export type WorkerRequest = InitRequest | ProcessRequest;
-
-export interface ProgressMessage {
-  type: "load-progress";
-  loaded: number;
-  total: number;
-  modelIndex: number;
-  modelCount: number;
-}
 
 export interface ReadyMessage {
   type: "ready";
@@ -41,8 +33,4 @@ export interface ErrorMessage {
   message: string;
 }
 
-export type WorkerResponse =
-  | ProgressMessage
-  | ReadyMessage
-  | ResultMessage
-  | ErrorMessage;
+export type WorkerResponse = ReadyMessage | ResultMessage | ErrorMessage;

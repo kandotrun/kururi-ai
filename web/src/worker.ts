@@ -45,46 +45,6 @@ function rotateChw(data: Float32Array, quartersCw: number): Float32Array {
   return result;
 }
 
-async function fetchModel(
-  url: string,
-  modelIndex: number,
-  modelCount: number,
-): Promise<ArrayBuffer> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`モデルを取得できませんでした (${response.status})`);
-  }
-  const total = Number(response.headers.get("content-length") ?? "0");
-  if (!response.body) {
-    return response.arrayBuffer();
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let loaded = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    chunks.push(value);
-    loaded += value.byteLength;
-    post({
-      type: "load-progress",
-      loaded,
-      total,
-      modelIndex,
-      modelCount,
-    });
-  }
-  const bytes = new Uint8Array(loaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes.buffer;
-}
-
 async function initialize(request: InitRequest): Promise<void> {
   const started = performance.now();
   ort.env.wasm.wasmPaths = request.wasmBaseUrl;
@@ -93,8 +53,7 @@ async function initialize(request: InitRequest): Promise<void> {
   sessions = [];
   for (let index = 0; index < request.models.length; index += 1) {
     const source = request.models[index]!;
-    const model = await fetchModel(source.url, index, request.models.length);
-    const session = await ort.InferenceSession.create(model, {
+    const session = await ort.InferenceSession.create(new Uint8Array(source.bytes), {
       executionProviders: ["wasm"],
       graphOptimizationLevel: "all",
       enableCpuMemArena: false,
