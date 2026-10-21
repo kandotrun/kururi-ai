@@ -96,6 +96,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--mode", choices=("fp32", "dynamic-int8"), required=True)
+    parser.add_argument("--provider", choices=("cpu", "openvino"), default="cpu")
     parser.add_argument("--threads", type=int, required=True)
     parser.add_argument("--trials", type=int, default=20)
     parser.add_argument("--low-memory", action="store_true")
@@ -126,6 +127,20 @@ def main() -> None:
     inputs = {}
     sessions = {}
     rng = np.random.default_rng(20261021)
+    providers = (
+        [
+            (
+                "OpenVINOExecutionProvider",
+                {
+                    "device_type": "CPU",
+                    "num_of_threads": str(max(1, args.threads)),
+                },
+            ),
+            "CPUExecutionProvider",
+        ]
+        if args.provider == "openvino"
+        else ["CPUExecutionProvider"]
+    )
     for name, stem, side, _ in MODELS:
         suffix = "" if args.mode == "fp32" else ".int8"
         path = args.model_dir / f"{stem}{suffix}.onnx"
@@ -134,7 +149,7 @@ def main() -> None:
         sessions[name] = ort.InferenceSession(
             str(path),
             sess_options=options,
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
 
     for name in ("base224", "small288", "small224"):
@@ -159,6 +174,7 @@ def main() -> None:
             "processor": platform.processor(),
         },
         "mode": args.mode,
+        "provider_requested": args.provider,
         "threads": args.threads,
         "model_threads": options.intra_op_num_threads,
         "low_memory": args.low_memory,
@@ -171,6 +187,7 @@ def main() -> None:
         "peak_rss_mib": peak_rss_mib,
         "onnxruntime": ort.__version__,
         "providers": sessions["base224"].get_providers(),
+        "available_providers": ort.get_available_providers(),
         "models": {
             name: {
                 "file": path.name,

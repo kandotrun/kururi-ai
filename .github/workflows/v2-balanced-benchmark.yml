@@ -70,6 +70,34 @@ jobs:
                 --output "reports/${mode}-t${threads}.json"
             done
           done
+      - name: Install OpenVINO execution provider
+        run: |
+          python -m pip uninstall -y onnxruntime
+          python -m pip install onnxruntime-openvino==1.24.1
+          python - <<'PY'
+          import onnxruntime as ort
+
+          assert "OpenVINOExecutionProvider" in ort.get_available_providers()
+          print(ort.__version__, ort.get_available_providers())
+          PY
+      - name: Benchmark OpenVINO
+        run: |
+          for mode in fp32 dynamic-int8; do
+            model_dir=fp32
+            if [ "$mode" = "dynamic-int8" ]; then
+              model_dir=reports/dynamic-int8
+            fi
+            for threads in 1 2 4 8; do
+              python scripts/benchmark_v2_balanced.py \
+                --model-dir "$model_dir" \
+                --mode "$mode" \
+                --provider openvino \
+                --threads "$threads" \
+                --trials 20 \
+                --low-memory \
+                --output "reports/openvino-${mode}-t${threads}.json"
+            done
+          done
       - name: Summarize
         run: |
           python - <<'PY'
@@ -83,6 +111,7 @@ jobs:
               rows.append(
                   {
                       "mode": report["mode"],
+                      "provider": report["provider_requested"],
                       "threads": report["threads"],
                       "p50_ms": round(report["latency_ms"]["median"], 2),
                       "p95_ms": round(report["latency_ms"]["p95"], 2),
@@ -91,11 +120,11 @@ jobs:
               )
           print(json.dumps(rows, indent=2))
           with open(environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("| Mode | Threads | p50 ms | p95 ms | Peak RSS MiB |\n")
-              summary.write("|---|---:|---:|---:|---:|\n")
+              summary.write("| Provider | Mode | Threads | p50 ms | p95 ms | Peak RSS MiB |\n")
+              summary.write("|---|---|---:|---:|---:|---:|\n")
               for row in rows:
                   summary.write(
-                      f"| {row['mode']} | {row['threads']} | {row['p50_ms']} | "
-                      f"{row['p95_ms']} | {row['peak_rss_mib']} |\n"
+                      f"| {row['provider']} | {row['mode']} | {row['threads']} | "
+                      f"{row['p50_ms']} | {row['p95_ms']} | {row['peak_rss_mib']} |\n"
                   )
           PY
