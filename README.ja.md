@@ -162,6 +162,10 @@ v1の`angle_ccw`は保存処理の回転方向を正しく表していなかっ�
 事前学習重みの派生で、向き分類用の変更とONNX変換を行っています。
 [第三者のライセンスとクレジット](THIRD_PARTY_NOTICES.md)を参照してください。
 
+依存関係の脆弱性やセキュリティ問題の報告方法は
+[SECURITY.md](SECURITY.md)に、更新方針と監査手順は
+[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)に記載しています。
+
 従来のv1向き判定モデルの作者は
 [新野ユキ / Yuki Arano](https://github.com/ObuchiYuki)です。
 

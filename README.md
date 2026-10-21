@@ -168,6 +168,10 @@ pretrained weights whose model cards declare Apache-2.0. Classifier replacement,
 orientation fine-tuning, ONNX conversion, and ensembling are modifications.
 See [third-party notices](THIRD_PARTY_NOTICES.md).
 
+Dependency-audit and private vulnerability-reporting policies are documented
+in [SECURITY.md](SECURITY.md) and
+[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
+
 The legacy v1 orientation model was created by
 [Yuki Arano / 新野ユキ](https://github.com/ObuchiYuki).
 
