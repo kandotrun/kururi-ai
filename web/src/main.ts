@@ -273,8 +273,13 @@ function nanoWorkers(): number {
   );
 }
 
+function demoPhotoLimit(): number {
+  const room = scene.capacity - Math.min(64, Math.floor(scene.capacity / 10));
+  return Math.min(config.limit ?? room, room);
+}
+
 function limitsFor(model: ModelId): StreamLimits {
-  const maxPrints = Math.min(scene.capacity, config.limit ?? scene.capacity);
+  const maxPrints = scene.capacity;
   if (model === "full") {
     return config.lowPower
       ? { maxPile: 12, maxLoading: 4, maxPrints, openingBatch: 40, openingHoldMs: 600 }
@@ -303,7 +308,7 @@ async function boot(): Promise<void> {
   overlay.setStatus("loading-model");
   scene.start();
   const { model, options } = await chooseModel();
-  const sources = await loadSources(limitsFor(model).maxPrints);
+  const sources = await loadSources(demoPhotoLimit());
   store.dispatch({ type: "totalChanged", total: sources.length });
   const chosen = choosePool(
     model,

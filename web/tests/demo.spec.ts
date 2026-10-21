@@ -34,9 +34,10 @@ test("lays crooked photos on the desk and straightens all of them", async ({ pag
   const errors = watchErrors(page);
   await serveCommonsLocally(page);
   await page.goto("/?seed=7&limit=24&workers=2&intro=off");
-  await expect(headline(page)).toContainText("向きがばらばらの写真");
-  await expect(headline(page)).toContainText("並べ終えた写真", { timeout: 150_000 });
-  await expect(headline(page)).toContainText("24枚");
+  await expect(headline(page)).toHaveAccessibleName(/向きがばらばらの写真/);
+  await expect(headline(page)).toHaveAccessibleName(/並べ終えた写真\s*24枚/, {
+    timeout: 150_000,
+  });
   await expect(page.locator(".ruler")).toContainText("判定");
   await page.getByRole("button", { name: "一覧", exact: true }).click();
   const rows = page.locator(".ledger-table tbody tr");
@@ -59,7 +60,9 @@ test("puts a visitor's photo on the desk without uploading it", async ({ page })
   });
   await page.goto("/?seed=3&limit=6&workers=2&intro=off");
   await page.locator('input[type="file"]').setInputFiles(VISITOR_PHOTO);
-  await expect(headline(page)).toContainText("並べ終えた写真", { timeout: 150_000 });
+  await expect(headline(page)).toHaveAccessibleName(/並べ終えた写真/, {
+    timeout: 150_000,
+  });
   await page.getByRole("button", { name: "一覧", exact: true }).click();
   const row = page.locator(".ledger-table tbody tr", { hasText: "sample2.webp" });
   await expect(row).toHaveCount(1);
@@ -84,7 +87,9 @@ test("keeps judging photos when WebGL is unavailable", async ({ page }) => {
   await serveCommonsLocally(page);
   await page.goto("/?seed=5&limit=8&workers=2&intro=off");
   await expect(page.locator(".flat-message")).toBeVisible();
-  await expect(headline(page)).toContainText("並べ終えた写真", { timeout: 150_000 });
+  await expect(headline(page)).toHaveAccessibleName(/並べ終えた写真/, {
+    timeout: 150_000,
+  });
   await page.getByRole("button", { name: "一覧を開く" }).click();
   await expect(page.locator(".ledger-table tbody tr")).toHaveCount(8);
 });
