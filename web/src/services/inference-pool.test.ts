@@ -4,6 +4,16 @@ import type { InitRequest, WorkerResponse } from "../types";
 import { createInferencePool, poolSize, type WorkerLike } from "./inference-pool";
 import type { LoadedModel } from "./model-loader";
 
+function workerError(message: string): ErrorEvent {
+  return Object.assign(new Event("error"), {
+    message,
+    filename: "",
+    lineno: 0,
+    colno: 0,
+    error: null,
+  });
+}
+
 class FakeWorker implements WorkerLike {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
@@ -35,7 +45,7 @@ class FakeWorker implements WorkerLike {
   }
 
   crash(message = "worker crashed"): void {
-    this.onerror?.(new ErrorEvent("error", { message }));
+    this.onerror?.(workerError(message));
   }
 
   result(id: string, correctionCw = 0): void {
