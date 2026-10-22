@@ -1,5 +1,6 @@
 /cli/cli.egg-info/
 /models/
+/cli/models/
 /.idea/
 .venv*/
 __pycache__/
