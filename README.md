@@ -17,7 +17,7 @@ or on x86-64 Linux, after a one-time download of about 700 MB. Everything runs o
 [![Code license: MIT](https://img.shields.io/badge/code%20license-MIT-2B5A4A)](LICENSE)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-kandotrun%2Fkururi--ai-2B5A4A)](https://deepwiki.com/kandotrun/kururi-ai)
 
-**[Try it in your browser](https://kandotrun.github.io/kururi-ai/)**&emsp;**[Download v2.0.0](#download)**&emsp;**[Quick start](#quick-start)**&emsp;[日本語で読む](README.ja.md)
+**[Try it in your browser](https://kururi-ai.2-38.com/)**&emsp;**[Download v2.0.0](#download)**&emsp;**[Quick start](#quick-start)**&emsp;[日本語で読む](README.ja.md)
 
 </div>
 
@@ -259,17 +259,23 @@ threads; to change that, run the engine `kururi-native` directly as shown in
 
 ## Browser demo
 
-[kandotrun.github.io/kururi-ai](https://kandotrun.github.io/kururi-ai/) runs a
-small **v2-nano** model (about 11.9 MB) inside your browser with ONNX Runtime Web.
-Your photos are not uploaded anywhere.
+[kururi-ai.2-38.com](https://kururi-ai.2-38.com/) runs Kururi inside your
+browser on a 3D sorting desk. After a short intro from space to Tokyo, about
+2,800 Wikimedia Commons featured pictures land on the desk, rotated on purpose,
+and the model turns each one upright. You can also add your own photos or a
+whole folder (RAW files such as DNG and NEF are judged from their embedded JPEG
+preview). Your photos are not uploaded anywhere.
 
-The demo is for a quick try, not for fixing a whole photo library:
-
-- It shows corrected previews only. It cannot save files.
-- It is less accurate: 324 of 396 (81.82%) on a smaller test set made for the
+- The default model is the small **v2-nano** (about 11.9 MB, ONNX Runtime Web).
+  It is less accurate: 324 of 396 (81.82%) on a smaller test set made for the
   demo model, so the number cannot be compared directly with the tables here.
+- Browsers with WebGPU can switch to the full **v2.0.0** ensemble (about 551 MB,
+  then a 199 MB helper model), kept in the browser's cache after the first
+  download.
+- The accuracy shown on the page is for these public photos and is not a
+  benchmark. The demo does not save corrected files.
 
-For your own photos, use the command-line tool. Demo details:
+To fix your own photo library, use the command-line tool. Demo details:
 [web/README.md](web/README.md).
 
 ## v1 vs v2 in detail

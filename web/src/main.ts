@@ -1,474 +1,635 @@
-import "@fontsource-variable/newsreader";
-import "./style.css";
-import type { WorkerResponse } from "./types";
+import { readAppConfig } from "./app-config";
+import type {
+  DeskScene,
+  FolderProgress,
+  GeoPoint,
+  InferencePool,
+  ModelId,
+  ModelOption,
+  PhotoRecord,
+  PhotoSource,
+  Stream,
+  StreamStatus,
+} from "./contracts";
+import { decodeManifest } from "./core/manifest";
+import { modelOptions, resolveModel } from "./core/model-profiles";
+import { splitPhotoFiles } from "./core/photo-files";
+import { mulberry32 } from "./core/random";
+import {
+  buildSourceQueue,
+  SAMPLE_PHOTOS,
+  sampleSource,
+  userSource,
+} from "./core/sources";
+import { computeStats } from "./core/stats";
+import { createStore, initialDeskState } from "./core/store";
+import { choosePool } from "./engine-choice";
+import { createFallbackScene } from "./fallback-scene";
+import { detectWebGpu, type GpuLike } from "./full/webgpu";
+import { createIntro, type Intro } from "./intro/intro";
+import { holdLandings } from "./landing-gate";
+import { createLazyPool } from "./lazy-pool";
+import {
+  createDeskScene,
+  onDeskSceneContext,
+  setDeskSettled,
+  WebGLUnavailableError,
+} from "./scene/desk-scene";
+import { createImageLoader } from "./services/image-loader";
+import { createInferencePool, poolSize } from "./services/inference-pool";
+import { loadModels } from "./services/model-loader";
+import { detectPhotoSupport } from "./services/photo-support";
+import {
+  browserRenderWorkers,
+  renderWorkerCount,
+} from "./services/render-workers";
+import { createStream, type StreamLimits } from "./services/stream";
+import { mountOverlay } from "./ui/overlay";
 
-type ItemState = "queued" | "working" | "done" | "error";
+const STATS_INTERVAL_MS = 1_000;
+const FALLBACK_CAPACITY = { desktop: 3200, lowPower: 900 };
+const TOKYO: GeoPoint = { lat: 35.6812, lon: 139.7671 };
+const MAX_ORIGINS = 3000;
+const FULL_CONFIRMED_KEY = "kururi-full-confirmed";
+const FULL_CACHE_PREFIX = "kururi-ai-full-";
 
-interface QueueItem {
-  id: string;
-  file: File;
-  simulateRotation: number;
-  state: ItemState;
-  bitmap: ImageBitmap;
-  card: HTMLElement;
-  beforeCanvas: HTMLCanvasElement;
-  afterCanvas: HTMLCanvasElement;
-  status: HTMLElement;
-  inferenceMs?: number;
+interface VisitorBatch {
+  progress: FolderProgress;
+  remaining: number;
 }
 
-const SAMPLE_FILES = [
-  "sample1.webp",
-  "sample2.webp",
-  "sample3.webp",
-  "sample4.webp",
-  "sample5.jpg",
-];
-
-const app = document.querySelector<HTMLDivElement>("#app");
-if (!app) {
+const root = document.querySelector<HTMLElement>("#app");
+if (!root) {
   throw new Error("Application root is missing");
 }
+const appRoot: HTMLElement = root;
 
-app.innerHTML = `
-  <main class="shell">
-    <header class="site-header">
-      <a class="wordmark" href="./" aria-label="くるりAI デモ">
-        <span class="wordmark-mark" aria-hidden="true">
-          <i></i><i></i><i></i>
-        </span>
-        <span>くるりAI <b>v2-nano</b></span>
-      </a>
-      <nav aria-label="関連リンク">
-        <a href="https://github.com/kandotrun/kururi-ai">GitHub</a>
-        <a href="https://github.com/kandotrun/kururi-ai/releases/tag/v2.0.0">v2.0.0</a>
-      </nav>
-    </header>
-
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="kicker">写真の向きを、まとめて整える。</p>
-        <h1 id="hero-title">
-          <span>大量の写真を、</span>
-          <span>まっすぐ。</span>
-        </h1>
-        <p class="lede">
-          写真を選ぶと、ブラウザの中だけで向きを判定し、補正後を並べて表示します。
-          アップロードはありません。
-        </p>
-        <div class="hero-actions">
-          <button class="primary-action" id="choose-files" type="button">
-            写真を選ぶ
-          </button>
-          <button class="text-action" id="load-samples" type="button">
-            サンプルで試す
-          </button>
-        </div>
-        <label class="simulation-control">
-          <input id="simulate-rotation" type="checkbox" checked />
-          <span class="switch" aria-hidden="true"></span>
-          <span>デモ用に写真の向きをランダムに崩す</span>
-        </label>
-      </div>
-
-      <div class="drop-stage" id="drop-stage">
-        <div class="photo-stack" aria-hidden="true">
-          <span class="stack-photo stack-one"></span>
-          <span class="stack-photo stack-two"></span>
-          <span class="stack-photo stack-three"></span>
-          <span class="corner-label">0° / 90° / 180° / 270°</span>
-        </div>
-        <div class="drop-copy">
-          <strong>ここに写真をドロップ</strong>
-          <span>JPEG・PNG・WebPなど</span>
-        </div>
-        <div class="model-meter" aria-live="polite">
-          <span id="model-status">11.9MBモデルを準備中</span>
-          <span id="model-percent">0%</span>
-          <i class="meter-track"><i id="model-progress"></i></i>
-        </div>
-      </div>
-    </section>
-
-    <section class="workbench" aria-labelledby="workbench-title">
-      <div class="workbench-head">
-        <div>
-          <p class="section-label">light table</p>
-          <h2 id="workbench-title">補正コンタクトシート</h2>
-        </div>
-        <div class="summary-strip" aria-live="polite">
-          <span><b id="count-ready">0</b> / <i id="count-total">0</i> 枚</span>
-          <span>中央値 <b id="median-time">—</b></span>
-          <button class="text-action" id="clear-all" type="button">クリア</button>
-        </div>
-      </div>
-
-      <div class="empty-state" id="empty-state">
-        <span class="empty-mark" aria-hidden="true">↻</span>
-        <p>写真を追加すると、元画像と補正後がここに並びます。</p>
-      </div>
-      <div class="contact-sheet" id="contact-sheet" aria-live="polite"></div>
-    </section>
-
-    <section class="notes" aria-label="モデル情報">
-      <article>
-        <p class="note-number">81.82%</p>
-        <h3>未使用テスト</h3>
-        <p>99枚×4方向 = 396条件。フルv2より軽量なブラウザ用モデルです。</p>
-      </article>
-      <article>
-        <p class="note-number">11.9MB</p>
-        <h3>INT8 ONNX</h3>
-        <p>MobileNetV4 SmallとMediumをQDQ量子化。WASMでCPU推論します。</p>
-      </article>
-      <article>
-        <p class="note-number">local</p>
-        <h3>画像は送信しない</h3>
-        <p>画像のデコード、推論、補正プレビューはすべてこのタブ内で完結します。</p>
-      </article>
-    </section>
-
-    <footer class="site-footer">
-      <span>くるりAI v2-nano demo</span>
-      <span>右角度の補正のみ対応</span>
-      <a href="model/provenance.json">モデル情報</a>
-    </footer>
-  </main>
-  <input id="file-input" type="file" accept="image/*" multiple hidden />
-`;
-
-function required<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) {
-    throw new Error(`Missing element: ${selector}`);
-  }
-  return element;
-}
-
-const fileInput = required<HTMLInputElement>("#file-input");
-const chooseFiles = required<HTMLButtonElement>("#choose-files");
-const loadSamples = required<HTMLButtonElement>("#load-samples");
-const clearAll = required<HTMLButtonElement>("#clear-all");
-const dropStage = required<HTMLElement>("#drop-stage");
-const simulateRotation = required<HTMLInputElement>("#simulate-rotation");
-const contactSheet = required<HTMLElement>("#contact-sheet");
-const emptyState = required<HTMLElement>("#empty-state");
-const countReady = required<HTMLElement>("#count-ready");
-const countTotal = required<HTMLElement>("#count-total");
-const medianTime = required<HTMLElement>("#median-time");
-const modelStatus = required<HTMLElement>("#model-status");
-const modelPercent = required<HTMLElement>("#model-percent");
-const modelProgress = required<HTMLElement>("#model-progress");
-
-const worker = new Worker(new URL("./worker.ts", import.meta.url), {
-  type: "module",
+const appBase = new URL(import.meta.env.BASE_URL, window.location.href);
+const wasmBaseUrl = new URL("ort/", appBase).href;
+const fullBaseSetting = import.meta.env.VITE_FULL_MODEL_BASE_URL;
+const fullBaseUrl = fullBaseSetting
+  ? new URL(fullBaseSetting, appBase).href
+  : null;
+const navigatorHints = navigator as Navigator & {
+  deviceMemory?: number;
+  gpu?: GpuLike;
+};
+const reducedMotionQuery = window.matchMedia(
+  "(prefers-reduced-motion: reduce)",
+);
+const config = readAppConfig(window.location.search, {
+  randomSeed: crypto.getRandomValues(new Uint32Array(1))[0] ?? 1,
+  prefersReducedMotion: reducedMotionQuery.matches,
+  coarsePointer: window.matchMedia("(pointer: coarse)").matches,
+  shortestScreenSide: Math.min(window.screen.width, window.screen.height),
+  deviceMemory: navigatorHints.deviceMemory,
+  hardwareConcurrency: navigator.hardwareConcurrency,
 });
-const queue: QueueItem[] = [];
-const items = new Map<string, QueueItem>();
-const baseUrl = new URL(import.meta.env.BASE_URL, window.location.href);
-const models = [
-  {
-    url: new URL("model/kururi-ai-v2-nano-small.onnx", baseUrl).href,
-    weight: 0.18,
-  },
-  {
-    url: new URL("model/kururi-ai-v2-nano.onnx", baseUrl).href,
-    weight: 0.82,
-  },
-];
-const wasmBaseUrl = new URL("ort/", baseUrl).href;
-let activeItem: QueueItem | null = null;
+
+const store = createStore(initialDeskState(0));
+const pendingFiles: File[] = [];
+const pendingBatchFiles = new Map<File, VisitorBatch>();
+const visitorBatches = new Map<string, VisitorBatch>();
+const photoSupport = detectPhotoSupport();
+let latestBatch: VisitorBatch | null = null;
+let reducedMotion = config.reducedMotion;
+let stream: Stream | null = null;
+let intro: Intro | null = null;
+let introSkipRequested = false;
+let activeModel: ModelId = "nano";
 let modelReady = false;
-let nextId = 0;
+let modelError: string | null = null;
+let streamStatus: StreamStatus = "loading-model";
+let pinned: string | null = null;
+let pausedByVisitor = false;
+let pausedByVisibility = false;
+let openLandingGate: () => void = () => {};
+const landingGate = new Promise<void>((resolve) => {
+  openLandingGate = resolve;
+});
 
-function randomRotation(): number {
-  return [0, 90, 180, 270][Math.floor(Math.random() * 4)] ?? 0;
-}
-
-function drawPhoto(
-  canvas: HTMLCanvasElement,
-  bitmap: ImageBitmap,
-  rotation: number,
-): void {
-  const ratio = window.devicePixelRatio || 1;
-  const width = 320;
-  const height = 236;
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  canvas.style.aspectRatio = `${width} / ${height}`;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return;
-  }
-  context.scale(ratio, ratio);
-  context.fillStyle = "#d4dedb";
-  context.fillRect(0, 0, width, height);
-  const quarter = ((rotation / 90) % 4 + 4) % 4;
-  const rotatedWidth = quarter % 2 === 0 ? bitmap.width : bitmap.height;
-  const rotatedHeight = quarter % 2 === 0 ? bitmap.height : bitmap.width;
-  const scale = Math.min((width - 20) / rotatedWidth, (height - 20) / rotatedHeight);
-  context.save();
-  context.translate(width / 2, height / 2);
-  context.rotate((rotation * Math.PI) / 180);
-  context.drawImage(
-    bitmap,
-    (-bitmap.width * scale) / 2,
-    (-bitmap.height * scale) / 2,
-    bitmap.width * scale,
-    bitmap.height * scale,
-  );
-  context.restore();
-}
-
-function createCard(item: QueueItem): HTMLElement {
-  const card = document.createElement("article");
-  card.className = "photo-card";
-  card.dataset.state = item.state;
-  card.innerHTML = `
-    <div class="photo-pair">
-      <figure>
-        <canvas></canvas>
-        <figcaption>入力</figcaption>
-      </figure>
-      <span class="pair-arrow" aria-hidden="true"></span>
-      <figure>
-        <canvas></canvas>
-        <figcaption>補正後</figcaption>
-      </figure>
-    </div>
-    <div class="photo-meta">
-      <strong title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</strong>
-      <span class="photo-status">待機中</span>
-    </div>
-  `;
-  item.card = card;
-  const canvases = card.querySelectorAll<HTMLCanvasElement>("canvas");
-  item.beforeCanvas = canvases[0]!;
-  item.afterCanvas = canvases[1]!;
-  const status = card.querySelector<HTMLElement>(".photo-status");
-  if (!status) {
-    throw new Error("Photo status element is missing");
-  }
-  item.status = status;
-  drawPhoto(item.beforeCanvas, item.bitmap, item.simulateRotation);
-  drawPhoto(item.afterCanvas, item.bitmap, item.simulateRotation);
-  return card;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-async function addFiles(files: File[]): Promise<void> {
-  const imageFiles = files
-    .filter((file) => file.type.startsWith("image/"))
-    .slice(0, Math.max(0, 60 - items.size));
-  for (const file of imageFiles) {
-    try {
-      let bitmap: ImageBitmap;
-      try {
-        bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-      } catch {
-        bitmap = await createImageBitmap(file);
-      }
-      const id = `photo-${nextId++}`;
-      const item: QueueItem = {
-        id,
-        file,
-        simulateRotation: simulateRotation.checked ? randomRotation() : 0,
-        state: "queued",
-        bitmap,
-        card: document.createElement("article"),
-        beforeCanvas: document.createElement("canvas"),
-        afterCanvas: document.createElement("canvas"),
-        status: document.createElement("span"),
-      };
-      items.set(id, item);
-      queue.push(item);
-      contactSheet.append(createCard(item));
-    } catch {
-      const failed = document.createElement("article");
-      failed.className = "photo-card error-card";
-      failed.innerHTML = `<strong>${escapeHtml(file.name)}</strong><p>この形式はブラウザで開けませんでした。</p>`;
-      contactSheet.append(failed);
-    }
-  }
-  updateCounts();
-  processNext();
-}
-
-function processNext(): void {
-  if (!modelReady || activeItem) {
-    return;
-  }
-  const item = queue.shift();
-  if (!item) {
-    return;
-  }
-  activeItem = item;
-  item.state = "working";
-  item.card.dataset.state = "working";
-  item.status.textContent = "判定中";
-  worker.postMessage({
-    type: "process",
-    id: item.id,
-    file: item.file,
-    simulateRotation: item.simulateRotation,
-  });
-}
-
-function updateCounts(): void {
-  const done = [...items.values()].filter((item) => item.state === "done");
-  countReady.textContent = String(done.length);
-  countTotal.textContent = String(items.size);
-  emptyState.hidden = items.size > 0;
-  const times = done
-    .map((item) => item.inferenceMs)
-    .filter((value): value is number => value !== undefined)
-    .sort((left, right) => left - right);
-  if (times.length === 0) {
-    medianTime.textContent = "—";
-    return;
-  }
-  const middle = Math.floor(times.length / 2);
-  const median =
-    times.length % 2 === 0
-      ? (times[middle - 1]! + times[middle]!) / 2
-      : times[middle]!;
-  medianTime.textContent = `${Math.round(median)} ms`;
-}
-
-worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-  const message = event.data;
-  if (message.type === "load-progress") {
-    const percent = message.total
-      ? Math.min(100, Math.round((message.loaded / message.total) * 100))
-      : 0;
-    modelPercent.textContent = `${percent}%`;
-    modelProgress.style.width = `${percent}%`;
-    modelStatus.textContent = `モデル ${message.modelIndex + 1}/${message.modelCount} を取得中`;
-    return;
-  }
-  if (message.type === "ready") {
-    modelReady = true;
-    modelStatus.textContent = `準備完了 · ${Math.round(message.loadMs)} ms`;
-    modelPercent.textContent = "100%";
-    modelProgress.style.width = "100%";
-    dropStage.dataset.ready = "true";
-    processNext();
-    return;
-  }
-  if (message.type === "result") {
-    const item = items.get(message.id);
-    if (!item) {
+const overlay = mountOverlay(appRoot, {
+  addFiles(files) {
+    void acceptVisitorFiles(files);
+  },
+  togglePause() {
+    if (!stream) {
       return;
     }
-    item.state = "done";
-    item.inferenceMs = message.inferenceMs;
-    item.card.dataset.state = "done";
-    item.status.textContent = `${message.correctionCw}° · ${Math.round(message.confidence * 100)}%`;
-    drawPhoto(
-      item.afterCanvas,
-      item.bitmap,
-      item.simulateRotation + message.correctionCw,
-    );
-    activeItem = null;
-    updateCounts();
-    processNext();
-    return;
-  }
-  const item = message.id ? items.get(message.id) : undefined;
-  if (item) {
-    item.state = "error";
-    item.card.dataset.state = "error";
-    item.status.textContent = "判定できませんでした";
-  } else {
-    modelStatus.textContent = message.message;
-  }
-  activeItem = null;
-  updateCounts();
-  processNext();
-};
-
-chooseFiles.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", () => {
-  void addFiles([...(fileInput.files ?? [])]);
-  fileInput.value = "";
+    if (stream.paused) {
+      pausedByVisitor = false;
+      stream.resume();
+    } else {
+      pausedByVisitor = true;
+      stream.pause();
+    }
+  },
+  scatter() {
+    void scene.scatterAll();
+  },
+  setSimulateUser() {},
+  selectRecord(id) {
+    select(id, true);
+  },
+  selectModel(id) {
+    switchModel(id);
+  },
+  skipIntro() {
+    requestIntroSkip();
+  },
 });
 
-loadSamples.addEventListener("click", async () => {
-  loadSamples.disabled = true;
+if (config.intro) {
+  overlay.setIntroActive(true);
+  overlay.canvas.style.visibility = "hidden";
+} else {
+  openLandingGate();
+}
+
+function requestIntroSkip(): void {
+  introSkipRequested = true;
+  intro?.skip();
+}
+
+function createScene(): DeskScene {
   try {
-    const files = await Promise.all(
-      SAMPLE_FILES.map(async (name) => {
-        const response = await fetch(new URL(`samples/${name}`, baseUrl));
-        if (!response.ok) {
-          throw new Error(`Sample ${name} is unavailable`);
-        }
-        const blob = await response.blob();
-        const type = name.endsWith(".webp") ? "image/webp" : "image/jpeg";
-        return new File([blob], name, { type });
-      }),
+    return createDeskScene(overlay.canvas, {
+      reducedMotion,
+      lowPower: config.lowPower,
+    });
+  } catch (error) {
+    if (!(error instanceof WebGLUnavailableError)) {
+      console.error(error);
+    }
+    overlay.webglUnavailable();
+    return createFallbackScene(
+      config.lowPower ? FALLBACK_CAPACITY.lowPower : FALLBACK_CAPACITY.desktop,
     );
-    await addFiles(files);
-  } finally {
-    loadSamples.disabled = false;
+  }
+}
+
+const scene = createScene();
+onDeskSceneContext(scene, (state) => {
+  if (state === "failed") {
+    overlay.webglUnavailable();
   }
 });
+scene.setViewInsets(overlay.viewInsets());
+overlay.onViewInsetsChange((insets) => scene.setViewInsets(insets));
 
-clearAll.addEventListener("click", () => {
-  if (activeItem) {
+async function acceptVisitorFiles(files: File[]): Promise<void> {
+  const { photos, skipped } = splitPhotoFiles(files, await photoSupport);
+  const progress: FolderProgress = {
+    found: files.length,
+    accepted: photos.length,
+    skipped,
+    done: photos.length === 0,
+  };
+  overlay.setFolderProgress(progress);
+  if (photos.length === 0) {
     return;
   }
-  for (const item of items.values()) {
-    item.bitmap.close();
-    item.card.remove();
+  const batch: VisitorBatch = { progress, remaining: photos.length };
+  latestBatch = batch;
+  for (const photo of photos) {
+    pendingBatchFiles.set(photo, batch);
   }
-  queue.splice(0);
-  items.clear();
-  updateCounts();
+  requestIntroSkip();
+  if (stream) {
+    handOff(stream, photos);
+  } else {
+    pendingFiles.push(...photos);
+  }
+}
+
+function handOff(target: Stream, photos: File[]): void {
+  for (const file of target.addUserFiles(photos)) {
+    const batch = pendingBatchFiles.get(file);
+    if (!batch) {
+      continue;
+    }
+    pendingBatchFiles.delete(file);
+    batch.progress = {
+      ...batch.progress,
+      accepted: batch.progress.accepted - 1,
+    };
+    settleBatch(batch);
+  }
+}
+
+function settleBatch(batch: VisitorBatch): void {
+  batch.remaining -= 1;
+  if (batch !== latestBatch) {
+    return;
+  }
+  if (batch.remaining <= 0) {
+    overlay.setFolderProgress({ ...batch.progress, done: true });
+    latestBatch = null;
+  } else {
+    overlay.setFolderProgress({ ...batch.progress });
+  }
+}
+
+function makeVisitorSource(file: File, id: string): PhotoSource {
+  const batch = pendingBatchFiles.get(file);
+  if (batch) {
+    pendingBatchFiles.delete(file);
+    visitorBatches.set(id, batch);
+  }
+  return userSource(file, id);
+}
+
+function recordOf(id: string | null): PhotoRecord | null {
+  return id === null ? null : (store.getState().records.get(id) ?? null);
+}
+
+function select(id: string | null, fromOverlay: boolean): void {
+  pinned = id;
+  overlay.pin(recordOf(id));
+  if (fromOverlay) {
+    scene.select(id);
+  }
+}
+
+function rememberFullConfirmed(): void {
+  try {
+    window.sessionStorage.setItem(FULL_CONFIRMED_KEY, "1");
+  } catch {
+    return;
+  }
+}
+
+function takeFullConfirmed(): boolean {
+  try {
+    const confirmed = window.sessionStorage.getItem(FULL_CONFIRMED_KEY) === "1";
+    window.sessionStorage.removeItem(FULL_CONFIRMED_KEY);
+    return confirmed;
+  } catch {
+    return false;
+  }
+}
+
+async function fullModelCached(): Promise<boolean> {
+  try {
+    const names = await window.caches.keys();
+    return names.some((name) => name.startsWith(FULL_CACHE_PREFIX));
+  } catch {
+    return false;
+  }
+}
+
+function switchModel(id: ModelId): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("model");
+  if (id === "full") {
+    rememberFullConfirmed();
+    url.searchParams.set("model", "full");
+  }
+  window.location.assign(url.toString());
+}
+
+function forgetModelInAddress(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("model")) {
+    return;
+  }
+  url.searchParams.delete("model");
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
+scene.on("hover", (id, at) => {
+  const record = recordOf(id);
+  if (record && at) {
+    overlay.showLoupe(record, at);
+  } else {
+    overlay.hideLoupe();
+  }
+});
+scene.on("select", (id) => select(id, false));
+
+let statsFrame = 0;
+function publishStats(): void {
+  statsFrame = 0;
+  overlay.setStats(computeStats(store.getState(), performance.now()));
+}
+
+function queueStats(): void {
+  if (statsFrame === 0) {
+    statsFrame = window.requestAnimationFrame(publishStats);
+  }
+}
+
+window.setInterval(queueStats, STATS_INTERVAL_MS);
+
+store.subscribe((state, action) => {
+  const id =
+    action.type === "added"
+      ? action.source.id
+      : "id" in action
+        ? action.id
+        : null;
+  const record = id === null ? undefined : state.records.get(id);
+  if (record) {
+    overlay.upsertRecord(record);
+    if (record.id === pinned) {
+      overlay.pin(record);
+    }
+    const batch = visitorBatches.get(record.id);
+    if (batch && (record.phase === "placed" || record.phase === "failed")) {
+      visitorBatches.delete(record.id);
+      settleBatch(batch);
+    }
+  }
+  queueStats();
 });
 
-for (const eventName of ["dragenter", "dragover"]) {
-  dropStage.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    dropStage.dataset.drag = "true";
+function showStatus(): void {
+  if (modelError !== null) {
+    overlay.setStatus("model-failed");
+    return;
+  }
+  overlay.setStatus(
+    !modelReady && streamStatus === "running" ? "loading-model" : streamStatus,
+  );
+}
+
+function sentence(text: string): string {
+  return /[。．！？]$/.test(text) ? text : `${text}。`;
+}
+
+async function loadSources(limit: number): Promise<PhotoSource[]> {
+  const random = mulberry32(config.seed);
+  if (config.commons) {
+    try {
+      const response = await fetch(new URL("commons/manifest.json", appBase));
+      if (!response.ok) {
+        throw new Error(`manifest ${response.status}`);
+      }
+      const manifest = decodeManifest(await response.json());
+      return buildSourceQueue(manifest, appBase, random, limit);
+    } catch (error) {
+      console.warn(error);
+      overlay.notice(
+        "Wikimedia Commons の写真一覧を読み込めませんでした。サンプルと自分の写真は並べられます。",
+      );
+    }
+  }
+  return SAMPLE_PHOTOS.slice(0, limit).map((sample, index) =>
+    sampleSource(appBase, sample, `sample-${index + 1}`),
+  );
+}
+
+function nanoWorkers(): number {
+  return (
+    config.workers ??
+    poolSize(
+      navigator.hardwareConcurrency,
+      navigatorHints.deviceMemory,
+      config.lowPower,
+    )
+  );
+}
+
+function nanoPool(): Promise<InferencePool> {
+  return loadModels(
+    [
+      {
+        url: new URL("model/kururi-ai-v2-nano-small.onnx", appBase).href,
+        weight: 0.18,
+      },
+      {
+        url: new URL("model/kururi-ai-v2-nano.onnx", appBase).href,
+        weight: 0.82,
+      },
+    ],
+    (progress) => overlay.setModelProgress(progress),
+  ).then((models) =>
+    createInferencePool({
+      size: nanoWorkers(),
+      createWorker: () =>
+        new Worker(new URL("./worker.ts", import.meta.url), {
+          type: "module",
+        }),
+      initMessage: () => {
+        const copies = models.map((model) => ({
+          bytes: model.bytes.slice(0),
+          weight: model.weight,
+        }));
+        return {
+          message: {
+            type: "init",
+            engine: "nano",
+            models: copies,
+            wasmBaseUrl,
+          },
+          transfer: copies.map((model) => model.bytes),
+        };
+      },
+    }),
+  );
+}
+
+function fullPool(baseUrl: string): InferencePool {
+  return createInferencePool({
+    size: 1,
+    createWorker: () =>
+      new Worker(new URL("./worker-full.ts", import.meta.url), {
+        type: "module",
+      }),
+    initMessage: () => ({
+      message: { type: "init", engine: "full", baseUrl, wasmBaseUrl },
+      transfer: [],
+    }),
+    onProgress: (progress) => overlay.setModelProgress(progress),
   });
 }
-for (const eventName of ["dragleave", "drop"]) {
-  dropStage.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    dropStage.dataset.drag = "false";
-  });
+
+function demoPhotoLimit(): number {
+  const room = scene.capacity - Math.min(64, Math.floor(scene.capacity / 10));
+  return Math.min(config.limit ?? room, room);
 }
-dropStage.addEventListener("drop", (event) => {
-  const files = [...(event.dataTransfer?.files ?? [])];
-  void addFiles(files);
+
+function limitsFor(model: ModelId): StreamLimits {
+  const maxPrints = scene.capacity;
+  if (model === "full") {
+    return config.lowPower
+      ? { maxPile: 12, maxLoading: 4, maxPrints, openingBatch: 40, openingHoldMs: 600 }
+      : { maxPile: 24, maxLoading: 6, maxPrints, openingBatch: 120, openingHoldMs: 600 };
+  }
+  return config.lowPower
+    ? { maxPile: 12, maxLoading: 4, maxPrints, openingBatch: 16, openingHoldMs: 1600 }
+    : { maxPile: 24, maxLoading: 6, maxPrints, openingBatch: 36, openingHoldMs: 1600 };
+}
+
+async function chooseModel(): Promise<{
+  model: ModelId;
+  options: ModelOption[];
+}> {
+  const confirmed = takeFullConfirmed();
+  forgetModelInAddress();
+  const webgpu = await detectWebGpu(navigatorHints.gpu).catch(() => false);
+  const options = modelOptions({ webgpu, fullBaseUrl });
+  const { model, notice } = resolveModel(config.model, options);
+  if (notice) {
+    overlay.notice(notice);
+  }
+  if (model === "full" && !confirmed && !(await fullModelCached())) {
+    overlay.setModels("nano", options);
+    const full = options.find((option) => option.id === "full");
+    if (full) {
+      void overlay.confirmFullModel(full).then((accepted) => {
+        if (accepted) {
+          switchModel("full");
+        }
+      });
+    }
+    return { model: "nano", options };
+  }
+  overlay.setModels(model, options);
+  return { model, options };
+}
+
+function originsOf(sources: readonly PhotoSource[]): GeoPoint[] {
+  const origins: GeoPoint[] = [];
+  for (const source of sources) {
+    if (source.location && origins.length < MAX_ORIGINS) {
+      origins.push({ lat: source.location.lat, lon: source.location.lon });
+    }
+  }
+  return origins;
+}
+
+async function playIntro(origins: readonly GeoPoint[]): Promise<void> {
+  if (!config.intro) {
+    return;
+  }
+  try {
+    intro = createIntro({
+      container: appRoot,
+      origins,
+      target: TOKYO,
+      textureBaseUrl: new URL("intro/", appBase).href,
+      lowPower: config.lowPower,
+    });
+    overlay.canvas.style.visibility = "";
+    if (introSkipRequested) {
+      intro.skip();
+    }
+    await intro.play();
+  } catch (error) {
+    console.warn(error);
+  } finally {
+    overlay.canvas.style.visibility = "";
+    openLandingGate();
+    intro?.dispose();
+    intro = null;
+    overlay.setIntroActive(false);
+  }
+}
+
+async function boot(): Promise<void> {
+  overlay.setStatus("loading-model");
+  scene.start();
+  const sources = await loadSources(demoPhotoLimit());
+  void playIntro(originsOf(sources));
+  const { model, options } = await chooseModel();
+  activeModel = model;
+  store.dispatch({ type: "totalChanged", total: sources.length });
+  const chosen = choosePool(
+    model,
+    {
+      nano: nanoPool,
+      full: () => fullPool(fullBaseUrl ?? ""),
+    },
+    (error) => {
+      console.warn(error);
+      activeModel = "nano";
+      overlay.setModels("nano", options);
+      const reason =
+        error instanceof Error ? error.message : "高精度モデルを読み込めませんでした";
+      overlay.notice(`${sentence(reason)}軽量モデルで判定します。`);
+    },
+  ).then((result) => {
+    activeModel = result.model;
+    return result.pool;
+  });
+  const pool = createLazyPool(chosen, model === "full" ? 1 : nanoWorkers());
+  pool.ready.then(
+    () => {
+      modelReady = true;
+      showStatus();
+    },
+    (error: unknown) => {
+      console.error(error);
+      modelError =
+        error instanceof Error ? error.message : "モデルを読み込めませんでした";
+      stream?.pause();
+      overlay.notice(sentence(modelError));
+      showStatus();
+    },
+  );
+  const renderWorkers = browserRenderWorkers(
+    renderWorkerCount(
+      navigator.hardwareConcurrency,
+      navigatorHints.deviceMemory,
+      config.lowPower,
+    ),
+  );
+  stream = createStream({
+    sources,
+    makeUserSource: makeVisitorSource,
+    loader: createImageLoader({
+      tileSize: scene.tileSize,
+      timeoutMs: 15_000,
+      render: renderWorkers.render,
+      heavyDecodes: renderWorkers.size,
+    }),
+    pool,
+    store,
+    scene: holdLandings(scene, landingGate),
+    random: mulberry32(config.seed ^ 0x9e3779b9),
+    now: () => performance.now(),
+    wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+    simulateUser: () => overlay.simulateUser(),
+    reducedMotion: () => reducedMotion,
+    limits: () => limitsFor(activeModel),
+    onStatus: (status) => {
+      streamStatus = status;
+      setDeskSettled(scene, status === "finished");
+      showStatus();
+    },
+    onNotice: (message) => overlay.notice(message),
+  });
+  stream.start();
+  if (pendingFiles.length > 0) {
+    handOff(stream, pendingFiles.splice(0));
+  }
+}
+
+reducedMotionQuery.addEventListener("change", (event) => {
+  reducedMotion = event.matches || config.forceReducedMotion;
+  scene.setReducedMotion(reducedMotion);
 });
-dropStage.addEventListener("click", () => fileInput.click());
-dropStage.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    fileInput.click();
+
+document.addEventListener("visibilitychange", () => {
+  if (!stream || pausedByVisitor) {
+    return;
+  }
+  if (document.hidden && !stream.paused) {
+    pausedByVisibility = true;
+    stream.pause();
+  } else if (!document.hidden && pausedByVisibility) {
+    pausedByVisibility = false;
+    stream.resume();
   }
 });
-dropStage.tabIndex = 0;
-dropStage.setAttribute("role", "button");
-dropStage.setAttribute("aria-label", "写真を選択またはドロップ");
 
-window.addEventListener("beforeunload", () => {
-  worker.terminate();
-  for (const item of items.values()) {
-    item.bitmap.close();
-  }
-});
-
-worker.postMessage({
-  type: "init",
-  models,
-  wasmBaseUrl,
+boot().catch((error: unknown) => {
+  console.error(error);
+  openLandingGate();
+  overlay.canvas.style.visibility = "";
+  overlay.setIntroActive(false);
+  overlay.notice(
+    error instanceof Error ? error.message : "デモを開始できませんでした。",
+  );
 });

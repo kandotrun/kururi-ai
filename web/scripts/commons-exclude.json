@@ -1,0 +1,961 @@
+{
+  "reviewed": "2026-10-21",
+  "method": "Visual review of every selected thumbnail on contact sheets; files flagged for a family-friendly demo or for having no natural upright direction are removed after selection.",
+  "files": [
+    {
+      "file": "07R01.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down macro of a microchip die and bond wires, with no inherent orientation."
+    },
+    {
+      "file": "2014_Filtr_powietrza_DEMCiflex.jpg",
+      "reason": "no-natural-up",
+      "note": "Flat, top-down view of a dusty air-filter panel with no clear up (unsure)."
+    },
+    {
+      "file": "2018-04-29_-_Écorce_de_bouleau.jpg",
+      "reason": "no-natural-up",
+      "note": "Full-frame close-up of bark texture; looks the same either way up"
+    },
+    {
+      "file": "A_artE_de_pORtas_abERtas_--_2025.jpg",
+      "reason": "nudity-or-sexual",
+      "note": "Uncertain, low concern. A collage of about 70 photos of painted doors (a composite, not a single photo). A few tiny painted figures, such as a Botero-style figure, may be nude. Natural up is clear."
+    },
+    {
+      "file": "Acavus_haemastoma_fastuosa_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate: several views of the same shell on black; up is weak or conventional only"
+    },
+    {
+      "file": "Agama_aculeata.jpg",
+      "reason": "no-natural-up",
+      "note": "Borderline. A camouflaged agama shot top-down on gravel; the ground texture gives no gravity cue."
+    },
+    {
+      "file": "Agapanthus_--_2021_--_3928.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure. Macro of flower petals and stamens. The stamens' curve gives only a weak cue for up."
+    },
+    {
+      "file": "Almeja_gigante_(Tridacna_maxima),_Temple,_Sharm_el-Sheij,_Egipto,_2022-03-26,_DD_33.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: giant clam mantle shot top-down on the reef; up is ambiguous"
+    },
+    {
+      "file": "Almeja_gigante_(Tridacna_maxima),_Zanzíbar,_Tanzania,_2024-05-30,_DD_68.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: giant clam mantle shot top-down, texture-like; up is ambiguous"
+    },
+    {
+      "file": "American_crocodile_close_up.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down close-up of crocodile back scutes and legs; a scale texture with no clear up."
+    },
+    {
+      "file": "Anentome_helena_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "Angaria_delphinus_01.jpg",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of spiny shells on grey, multiple views"
+    },
+    {
+      "file": "Angaria_melanacantha_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of spiny shells on grey, multiple views"
+    },
+    {
+      "file": "Antigua_(Fuerteventura,_Spain),_Museo_de_las_Salinas_del_Carmen,_Kristallisierungsbecken_--_2025_--_7231.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down texture of salt crystals around a stone in an evaporation pan."
+    },
+    {
+      "file": "Anémonas_joya_(Corynactis_viridis),_Parque_natural_de_la_Arrábida,_Portugal,_2023-07-27,_DD_36.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: frame-filling cluster of jewel anemones seen face-on; no clear up"
+    },
+    {
+      "file": "Aphidoidea_fight.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: a macro of aphids on a fabric-like texture with a 1 mm scale bar. Apart from the scale bar there is no real cue to which way is up."
+    },
+    {
+      "file": "Arenal_moteado_(Parapercis_hexophtalma),_Ras_Katy,_Sharm_el-Sheij,_Egipto,_2022-03-26,_DD_91.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: fish on sand seen from nearly straight above; little perspective"
+    },
+    {
+      "file": "Asiento_de_suegra_(Echinocactus_grusonii),_Jardín_Botánico,_Múnich,_Alemania,_2013-09-08,_DD_02.JPG",
+      "reason": "no-natural-up",
+      "note": "Barrel cactus shot from directly above; radial symmetry"
+    },
+    {
+      "file": "Asperitas_bimaensis_cochlostyloides_viridis_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of green snail shells on black, multiple views"
+    },
+    {
+      "file": "Atlantic_mackerel_(Scomber_scombrus).jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Three dead mackerel lying on a cloth (food shot); dead fish are the main subject"
+    },
+    {
+      "file": "Auchenorrhyncha_Anaglyph.jpg",
+      "reason": "not-a-photo",
+      "note": "Borderline. A red/cyan stereo anaglyph composite: it looks like a glitchy doubled image rather than a normal photo, and the subject looks like a mounted specimen."
+    },
+    {
+      "file": "Ba_b767-300_g-bnwa_planform_arp.jpg",
+      "reason": "no-natural-up",
+      "note": "Airliner seen from directly below against plain sky (planform view). No horizon or up cue."
+    },
+    {
+      "file": "Babuchas_02_--_2014_--_Marrakech,_Marruecos.jpg",
+      "reason": "no-natural-up",
+      "note": "Dense, repeating pattern of slippers seen from above. Orientation is ambiguous (unsure)."
+    },
+    {
+      "file": "Banco_de_peces_trompeta_(Macroramphosus_scolopax),_islas_Azores,_Portugal,_2020-07-27,_DD_38.jpg",
+      "reason": "no-natural-up",
+      "note": "Dense school of small fish filling the frame as a blue streaky texture; no up"
+    },
+    {
+      "file": "Beetroots_in_a_basket.jpg",
+      "reason": "no-natural-up",
+      "note": "Rectangular basket shot from above on planks. Symmetric under 180-degree rotation. Uncertain."
+    },
+    {
+      "file": "Busycon_contrarium_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "California_Sheephead_(Semicossyphus_pulcher)_at_Ensenada's_fishmarket.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Dead fish head on a fish-market counter, close-up with mouth open"
+    },
+    {
+      "file": "Camarón_(Dasycaris_zanzibarica),_Anilao,_Filipinas,_2023-08-21,_DD_73.jpg",
+      "reason": "no-natural-up",
+      "note": "Borderline. Underwater macro of shrimp on a diagonal whip coral with no gravity or horizon cue."
+    },
+    {
+      "file": "Cangrejo_porcelana_(Neopetrolisthes_maculatus)_en_una_anémona_alfombra_de_Mertens_(Stichodactyla_mertensii),_Anilao,_Filipinas,_2023-08-22,_DD_223.jpg",
+      "reason": "no-natural-up",
+      "note": "Borderline. Porcelain crab on a carpet anemone, shot mostly from above underwater; orientation is ambiguous."
+    },
+    {
+      "file": "Canis_lupus_lupus_in_Alpenzoo,_Innsbruck.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Unsure: wolves snarling at each other, with what look like reddish meat or carcass scraps on the ground between them. The thumbnail is too small to be certain."
+    },
+    {
+      "file": "Cassis_cornuta_01.jpg",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "Catedral_de_Westminster,_Londres,_Inglaterra,_2022-11-23,_DD_37-39_HDR.jpg",
+      "reason": "no-natural-up",
+      "note": "A mosaic vault photographed straight up. A text panel at one edge is the only cue for orientation."
+    },
+    {
+      "file": "Celmisia_semicordata_01.jpg",
+      "reason": "no-natural-up",
+      "note": "Daisy shot face-on from above against gravel; radial, with no up cue"
+    },
+    {
+      "file": "Cesena_-_Duomo_di_Cesena_-_Crocifisso_-_2023-10-12_21-00-00_002.jpg",
+      "reason": "disturbing-other",
+      "note": "Uncertain. A close-up of a carved crucifix (Christ on the cross, loincloth, no visible gore). Probably fine as religious art, but an execution scene is the main subject."
+    },
+    {
+      "file": "Chaunax_stigmaeus_dorsal_view2.jpg",
+      "reason": "no-natural-up",
+      "note": "Dorsal (top-down) view of a fish specimen on black, probably a preserved specimen; no natural up"
+    },
+    {
+      "file": "Chickens_in_market.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Plucked whole chicken carcasses hang at a market stall, with raw meat and offal on a tray below. Dead animals are the main subject."
+    },
+    {
+      "file": "Chicomurex_venustulus_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "Chicoreus_aculeatus_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "Clanculus_ormophorus_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Composite specimen plate of shells on black, multiple views"
+    },
+    {
+      "file": "Colored_flowers_e.jpg",
+      "reason": "no-natural-up",
+      "note": "Collage grid of 12 flower heads shot from above on black; a composite rather than a single scene"
+    },
+    {
+      "file": "Coloured,_textured_craft_card_edit.jpg",
+      "reason": "no-natural-up",
+      "note": "Fanned sheets of coloured card shot flat on black, with no orientation cue."
+    },
+    {
+      "file": "Coral_(Euphyllia_ancora),_Anilao,_Filipinas,_2023-08-22,_DD_292.jpg",
+      "reason": "no-natural-up",
+      "note": "Coral colony shot straight down; no up"
+    },
+    {
+      "file": "Coral_(Favia_favus),_mar_Rojo,_Egipto,_2023-04-18,_DD_116.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling top-down coral texture"
+    },
+    {
+      "file": "Coral_(Goniopora_lobata),_islas_Ad_Dimaniyat,_Omán,_2024-08-13,_DD_64.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling coral polyp texture; no up"
+    },
+    {
+      "file": "Coral_(Heliofungia_actiniformis),_Anilao,_Filipinas,_2023-08-21,_DD_15.jpg",
+      "reason": "no-natural-up",
+      "note": "Coral shot top-down on a reef background; no up"
+    },
+    {
+      "file": "Coral_(Pachyseris_speciosa),_mar_Rojo,_Egipto,_2023-04-15,_DD_39.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling top-down coral ridge texture"
+    },
+    {
+      "file": "Coral_(Platygyra_daedalea),_Anilao,_Filipinas,_2023-08-22,_DD_281.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling brain-coral maze texture"
+    },
+    {
+      "file": "Coral_(Sarcophyton_glaucum),_Ras_Katy,_Sharm_el-Sheij,_Egipto,_2022-03-26,_DD_113.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: soft coral shot mostly from above; weak up cue"
+    },
+    {
+      "file": "Coral_burbuja_(Plerogyra_sinuosa),_mar_Rojo,_Egipto,_2023-04-17,_DD_13.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling bubble-coral texture; no up"
+    },
+    {
+      "file": "Coral_oreja_de_elefante_(Amplexidiscus_fenestrafer),_Nosy_Kalakajoro,_Madagascar,_2025-09-14,_DD_90.jpg",
+      "reason": "no-natural-up",
+      "note": "Disc-shaped corallimorph shot straight down; radially symmetric, no up"
+    },
+    {
+      "file": "Coral_plato_(Danafungia_scruposa),_mar_Rojo,_Egipto,_2023-04-15,_DD_49.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: radially symmetric mushroom coral seen mostly from above; little perspective"
+    },
+    {
+      "file": "Crassula_arborescens,_Jardín_Botánico,_Múnich,_Alemania_2012-04-21,_DD_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Unsure: dense close-up of succulent leaves with only weak orientation cues"
+    },
+    {
+      "file": "Crocodylus_acutus_close_up_2.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling skin texture around a crocodile's eyes; reads as an abstract texture, up is ambiguous"
+    },
+    {
+      "file": "Crocodylus_acutus_mexico_01.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: crocodile in water shot almost straight down, head pointing to the bottom; weak up cue"
+    },
+    {
+      "file": "Daucus-carota-Sitia-Crete-Greece.jpg",
+      "reason": "no-natural-up",
+      "note": "Wild carrot umbel shot from directly above"
+    },
+    {
+      "file": "Detail_van_een_bladrozet_van_een_Speerdistel_(Cirsium_vulgare)_06-02-2020._(d.j.b)_03.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a thistle leaf rosette; texture-like"
+    },
+    {
+      "file": "Dichroitisches_Prisma_--_2020_--_5123.jpg",
+      "reason": "no-natural-up",
+      "note": "Abstract light beams through a dichroic prism on black, with no up."
+    },
+    {
+      "file": "Dish_of_blueberries.jpg",
+      "reason": "no-natural-up",
+      "note": "Bowl of blueberries on white, shot from above. Weak up cue. Uncertain."
+    },
+    {
+      "file": "Drosera_rotundifolia_leaf1.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: horizontal sundew leaf on a black background; orientation is ambiguous"
+    },
+    {
+      "file": "DuplexScaling.jpg",
+      "reason": "no-natural-up",
+      "note": "Tilted close-up of grand-piano strings seen from above, with an ambiguous orientation (unsure)."
+    },
+    {
+      "file": "Dülmen,_Hausdülmen,_Baumwurzel_--_2021_--_7057.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a cut tree stump on sandy ground with small flowers. No up direction."
+    },
+    {
+      "file": "Egyptian_food_Koshary.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down flat lay. Composition (spoon at bottom) gives only a weak up cue. Uncertain."
+    },
+    {
+      "file": "Emblemariopsis_carib_(Caribbean_Flagfin_Blenny).jpg",
+      "reason": "no-natural-up",
+      "note": "Coral polyp texture with a tiny blenny. Weak up cue. Uncertain."
+    },
+    {
+      "file": "Endangered_arctic_-_starving_polar_bear.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "A visibly starving, emaciated polar bear on an ice floe, shown as a dying animal. The title also says it is starving, so it may upset a general audience."
+    },
+    {
+      "file": "Ensis_ensis_(Linnaeus_1758).jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down shot of a razor clam shell crusted with barnacles, lying on wet sand. No up direction; the shell is empty, so not gory."
+    },
+    {
+      "file": "Entacmaea_quadricolor_(Bubble_tip_anemone).jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up texture of anemone bubble tips. Weak up cue. Uncertain."
+    },
+    {
+      "file": "Erizo_de_flor_(Toxopneustes_pileolus),_Zanzíbar,_Tanzania,_2024-06-01,_DD_134.jpg",
+      "reason": "no-natural-up",
+      "note": "Round flower urchin shot from above on sand. Radially symmetric."
+    },
+    {
+      "file": "Estrella_de_mar_granulada_(Choriaster_granulatus),_Zanzíbar,_Tanzania,_2024-05-31,_DD_67.jpg",
+      "reason": "no-natural-up",
+      "note": "Starfish shot from above. Five-fold symmetry gives no upright."
+    },
+    {
+      "file": "Estrella_espinosa_común_(Marthasterias_glacialis),_Madeira,_Portugal,_2019-05-31,_DD_57.jpg",
+      "reason": "no-natural-up",
+      "note": "Starfish shot from above on flat rock."
+    },
+    {
+      "file": "Euphorbia_cyparissias_quadrat.jpg",
+      "reason": "no-natural-up",
+      "note": "Radial flower cluster shot from above on a dark background"
+    },
+    {
+      "file": "FEMA_-_44359_-_Oklahoma_tornado_destroyed_home.jpg",
+      "reason": "disturbing-other",
+      "note": "Borderline. A house destroyed by a tornado; disaster aftermath may upset some viewers. No people visible."
+    },
+    {
+      "file": "Fish_hanging_in_the_sun_with_black_background.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Dried dead fish hanging from a stick on a string; the dead animal is the subject."
+    },
+    {
+      "file": "Fomes_fomentarius_inside_2009_G1.jpg",
+      "reason": "no-natural-up",
+      "note": "Cut cross-section of a bracket fungus on white with a scale bar. Specimen-style, upright ambiguous. Uncertain."
+    },
+    {
+      "file": "Fontana_di_Trevi_by_TC.jpg",
+      "reason": "nudity-or-sexual",
+      "note": "Uncertain. A close-up of the Oceanus statue at the Trevi Fountain, bare-chested with drapery over the groin. Classical and mild, but a semi-nude statue is the main subject."
+    },
+    {
+      "file": "Fortezza_Verrucole_Archeopark_interno.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Uncertain. A dim medieval kitchen reconstruction with what looks like a dead bird (wings spread) hanging from the ceiling near the window. Small, likely a prop, and not the focus."
+    },
+    {
+      "file": "Fresh_bilberries_picked_in_Tuntorp_4.jpg",
+      "reason": "no-natural-up",
+      "note": "Oval basket of bilberries shot from above. Nearly symmetric."
+    },
+    {
+      "file": "Frosty_grass_wave.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure. Close-up texture of frosted grass with no horizon, so orientation is ambiguous."
+    },
+    {
+      "file": "Fuente_Wittelsbacher,_Plaza_Lenbach,_Múnich,_Alemania,_2015-07-04,_DD_07-09_HDR.JPG",
+      "reason": "nudity-or-sexual",
+      "note": "Low concern. The Wittelsbacher Fountain has classical figures on its sides (likely nude) that are tiny and not the focus; the fountain as a whole is the subject."
+    },
+    {
+      "file": "Gaillardia_fanfare_centered.jpg",
+      "reason": "no-natural-up",
+      "note": "Centered face-on flower head; radial symmetry"
+    },
+    {
+      "file": "Gazania_krebsiana,_Quebec_city,_Quebec,_Canada_131.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling face-on macro of the flower center"
+    },
+    {
+      "file": "Gazania_rigens-1.jpg",
+      "reason": "no-natural-up",
+      "note": "Flower shot face-on from above; radial, with weak background cues"
+    },
+    {
+      "file": "Gazania_rigens_cultivar_in_Conques.jpg",
+      "reason": "no-natural-up",
+      "note": "Face-on radial flower shot from above"
+    },
+    {
+      "file": "Gentiana_acaulis_(stemless_gentian).jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: gentian shot face-on from above; only the calyx gives a weak cue"
+    },
+    {
+      "file": "Gentle_grip_of_a_baby_Toque_macaque_under_its_mother's_care.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: a tight crop of a baby's hand on its mother's fur, with almost no background. The fur direction is the only weak clue to which way is up."
+    },
+    {
+      "file": "Geopende_zaaddoos_van_een_wilde_hyacint_24-07-2022._(d.j.b).jpg",
+      "reason": "no-natural-up",
+      "note": "Open three-part seed capsule seen end-on. Radially symmetric."
+    },
+    {
+      "file": "Gespietste_kastanje_13-01-2022._(d.j.b).jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up of a split chestnut interior, roughly top-down. Uncertain."
+    },
+    {
+      "file": "Getekend_blad_van_Cyclamen_hederifolium._30-11-2022._(d.j.b)_02.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a cyclamen leaf mound on leaf litter"
+    },
+    {
+      "file": "Giant_clam_black&white_komodo.jpg",
+      "reason": "no-natural-up",
+      "note": "Giant clam mantle shot from above on reef. No horizon or gravity cue."
+    },
+    {
+      "file": "Glaucus_atlanticus_1.jpg",
+      "reason": "no-natural-up",
+      "note": "Blue sea slugs on a plain white background, shot from above."
+    },
+    {
+      "file": "Gold_chain_with_gemstones_and_enamel,_late_16th_century,_The_Royal_Armoury,_Sweden.jpg",
+      "reason": "no-natural-up",
+      "note": "Necklace laid flat on white and shot top-down, with no natural up."
+    },
+    {
+      "file": "Green_frog_(Pelophylax_esculentus_complex)_Danube_delta.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: frog floating on plain water, seen from above; no horizon or ground"
+    },
+    {
+      "file": "Green_rice_sheaves_planted_in_a_paddy_field_with_long_shadows_at_golden_hour_in_Don_Det_Laos.jpg",
+      "reason": "no-natural-up",
+      "note": "Near top-down texture of rice seedlings in water, with no horizon. Orientation is ambiguous."
+    },
+    {
+      "file": "Gutweed_at_low_tide_in_Brofjorden_8.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of seaweed on an orange rock surface"
+    },
+    {
+      "file": "Hiroshige_II_-_Kishu_kumano_iwatake_tori_-_Shokoku_meisho_hyakkei.jpg",
+      "reason": "not-a-photo",
+      "note": "Japanese ukiyo-e woodblock print by Hiroshige II, not a photograph."
+    },
+    {
+      "file": "Hohenbuehelia_mastrucata_(Fr.)_Singer_369296.jpg",
+      "reason": "no-natural-up",
+      "note": "Gill fan of a bracket fungus seen from below. Orientation ambiguous. Uncertain."
+    },
+    {
+      "file": "Hosta_two-tone_3.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down texture of hosta leaves"
+    },
+    {
+      "file": "Iceland_Poppy_Papaver_nudicaule_'Champagne_Bubbles'_Orange_Center.jpg",
+      "reason": "no-natural-up",
+      "note": "Frame-filling face-on macro of the poppy center; radial"
+    },
+    {
+      "file": "Iglesia_de_San_Felipe_y_Santiago,_Nápoles,_Italia,_2023-03-25,_DD_72-74_HDR.jpg",
+      "reason": "no-natural-up",
+      "note": "Shot looking straight up at the frescoed nave ceiling, with no floor or horizon in frame."
+    },
+    {
+      "file": "Iglesia_de_San_Francisco,_Quito,_Ecuador,_2015-07-22,_DD_159-161_HDR.JPG",
+      "reason": "no-natural-up",
+      "note": "Straight-up view of the gilded ceiling and crossing vault. Nothing shows which way is up."
+    },
+    {
+      "file": "Inachis_io_top_detail_MichaD.jpg",
+      "reason": "no-natural-up",
+      "note": "Extreme close-up of a peacock butterfly wing eyespot; an abstract texture with no clear up."
+    },
+    {
+      "file": "Inside_of_a_hot_air_balloon.jpg",
+      "reason": "no-natural-up",
+      "note": "Looking straight up into the balloon envelope. Radial spiral pattern."
+    },
+    {
+      "file": "Iwami_squid_drying_DSC01868.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Gutted whole squid hung to dry, tentacles in sharp focus. Food context, but a borderline carcass close-up."
+    },
+    {
+      "file": "Jacaré_do_pantanal.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Caiman holding a torn-up fish/prey in its jaws; the prey being eaten is clearly visible"
+    },
+    {
+      "file": "Kalahari_lion_(Panthera_leo)_male_cub_4_months.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "A lion cub with fresh blood smeared over its muzzle and chest after feeding on prey. The gore is easy to see in the image."
+    },
+    {
+      "file": "Kapelle_St._Martin-Caplutta_Sogn_Martin._(actm)_02.jpg",
+      "reason": "no-natural-up",
+      "note": "Radially symmetric wooden door rosette. The hanging ring is the only weak cue (unsure)."
+    },
+    {
+      "file": "Klee_Wagenmoos_01.JPG",
+      "reason": "no-natural-up",
+      "note": "Top-down view of clover and moss ground cover"
+    },
+    {
+      "file": "Kopenhagen_(DK),_Innenhafen_--_2017_--_1699.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up of mooring rings lying on stone, seen from above. Up cues are weak (unsure)."
+    },
+    {
+      "file": "Kreta_(GR),_Rethymno,_Küchenutensilien_--_2023_--_8185.jpg",
+      "reason": "no-natural-up",
+      "note": "Tight bundle of olive-wood spatulas filling the frame, with an ambiguous orientation (unsure)."
+    },
+    {
+      "file": "Lacerta_agilis_female_2014_G2.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: lizard on a flat rock seen from directly above; up is ambiguous"
+    },
+    {
+      "file": "Laranjas-pera.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down pile of citrus filling the whole frame. Repeating texture with no up cue."
+    },
+    {
+      "file": "Lenguado_(Pardachirus_marmoratus),_Zanzíbar,_Tanzania,_2024-05-31,_DD_32.jpg",
+      "reason": "no-natural-up",
+      "note": "Flatfish shot from above on sand."
+    },
+    {
+      "file": "Lenguado_común_(Solea_solea),_Parque_natural_de_la_Arrábida,_Portugal,_2020-07-23,_DD_05-06_FS.jpg",
+      "reason": "no-natural-up",
+      "note": "Sole almost invisible in sand. Top-down sand texture."
+    },
+    {
+      "file": "Leucanthemum_vulgare.jpeg",
+      "reason": "no-natural-up",
+      "note": "Daisy shot straight down. The radially symmetric flower sits on a uniform green blur, so nothing shows which way is up. Borderline."
+    },
+    {
+      "file": "Limanda_noruega_(Phrynorhombus_norvegicus),_Parque_natural_de_la_Arrábida,_Portugal,_2023-07-27,_DD_28.jpg",
+      "reason": "no-natural-up",
+      "note": "Flatfish shot from above on the seabed."
+    },
+    {
+      "file": "Liocarcinus_marmoreus_2.jpg",
+      "reason": "no-natural-up",
+      "note": "Borderline. Top-down shot of a crab on a plain black studio background; it looks like a pale, possibly preserved specimen. Up is only a convention."
+    },
+    {
+      "file": "Loligo_vulgaris.jpg",
+      "reason": "no-natural-up",
+      "note": "Squid laid flat on black and shot from above, probably a dead specimen. Upright is ambiguous."
+    },
+    {
+      "file": "Loro_Parque_Koi3.JPG",
+      "reason": "no-natural-up",
+      "note": "Dense crowd of koi seen from above. Abstract, texture-like."
+    },
+    {
+      "file": "Lybia_tessellata.jpg",
+      "reason": "no-natural-up",
+      "note": "Boxer crab shot from directly above on coral polyps; a top-down underwater texture with no gravity cue."
+    },
+    {
+      "file": "Líneas_de_Nazca,_Nazca,_Perú,_2015-07-29,_DD_54.JPG",
+      "reason": "no-natural-up",
+      "note": "Aerial top-down view of the Nazca spider geoglyph."
+    },
+    {
+      "file": "Macrospondylus_bollensis_Holzmaden.jpg",
+      "reason": "no-natural-up",
+      "note": "Fossil skeleton on a stone slab photographed flat; no natural up (fossil remains, not upsetting)"
+    },
+    {
+      "file": "Mamões.jpg",
+      "reason": "no-natural-up",
+      "note": "Papayas in foam netting filling the frame, shot from above. Texture with no orientation."
+    },
+    {
+      "file": "Mangostim.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down mass of mangosteens filling the frame. Abstract repeating texture."
+    },
+    {
+      "file": "Marine_algae_in_Gullmarsfjorden_at_Sämstad_4.jpg",
+      "reason": "no-natural-up",
+      "note": "Abstract top-down or underwater view of algae, with no orientation cues."
+    },
+    {
+      "file": "Masashi_Kokuen_Kiritsuke_Petty_135mm_(2026)-104A7479.jpg",
+      "reason": "no-natural-up",
+      "note": "Kitchen knife laid flat on a stone texture and shot top-down. It is a kitchen product shot, not a weapon focus."
+    },
+    {
+      "file": "Match_and_match_labels,_100_years_ago.jpg",
+      "reason": "no-natural-up",
+      "note": "Flat-lay of printed matchbox labels placed diagonally. These are mostly graphic prints, and the text runs in mixed directions."
+    },
+    {
+      "file": "Miners_change_room,_Rammelsberg,_Lower_Saxony,_Germany,_2015-05-17.jpg",
+      "reason": "no-natural-up",
+      "note": "Looking straight up at the ceiling at miners' clothes hung on chains."
+    },
+    {
+      "file": "Mohnblüte_2019-05-30_11-00-41_(C).jpg",
+      "reason": "no-natural-up",
+      "note": "Poppy interior shot from above. The radial macro fills the frame with no stem or horizon."
+    },
+    {
+      "file": "Morena_del_Mediterráneo_(Muraena_helena),_Catania,_Sicilia,_Italia,_2025-04-05,_DD_29.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Moray eel with a torn white piece of something in its mouth, likely prey being eaten. Uncertain at thumbnail size."
+    },
+    {
+      "file": "Mucronella_flava_-_18_images_-_Tillamook,_Oregon.jpg",
+      "reason": "no-natural-up",
+      "note": "Yellow fungal spines on a dark log surface. Reads as an abstract texture. Uncertain."
+    },
+    {
+      "file": "Mud_Cow_Racing_-_Pacu_Jawi_-_West_Sumatra,_Indonesia.jpg",
+      "reason": "person-identifiable-closeup",
+      "note": "Unsure: a cultural event photo, but the jockey's face is clear and he is in the centre of the frame, so a private person is the main subject."
+    },
+    {
+      "file": "National_Grand_Theatre_detail.jpg",
+      "reason": "no-natural-up",
+      "note": "Abstract close-up of the curved panels on the building's shell. It reads as a texture with no up direction."
+    },
+    {
+      "file": "New_snow_on_birch_crowns_in_Tuntorp_3.jpg",
+      "reason": "no-natural-up",
+      "note": "Looking straight up into snowy birch crowns against the sky; no up direction"
+    },
+    {
+      "file": "Nieuw_blad_van_de_Berenklauw_Heracleum._24-03-2020._(d.j.b)_01.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a new Heracleum leaf on leaf litter, so any rotation looks plausible."
+    },
+    {
+      "file": "Oczlik_(Cyclops)_-_samica.jpg",
+      "reason": "no-natural-up",
+      "note": "Microscopy of a Cyclops copepod with egg sacs on a black background; no natural up."
+    },
+    {
+      "file": "Olive_harvest_combs._Anthidona._Greece.jpg",
+      "reason": "no-natural-up",
+      "note": "Olive harvest combs lying on stone paving, shot from above."
+    },
+    {
+      "file": "Operation_Crossroads_Baker_Edit.jpg",
+      "reason": "violence-or-weapon-focus",
+      "note": "The Operation Crossroads Baker nuclear weapon test explosion is the subject"
+    },
+    {
+      "file": "Organic_home-grown_tomatoes_-_unripe_to_ripe.jpg",
+      "reason": "no-natural-up",
+      "note": "Radial top-down arrangement of tomatoes on mesh. The green-to-red gradient is a design choice, not gravity."
+    },
+    {
+      "file": "Oweston_sting_fish_for_sale_at_Tsukiji_Fishmarket,_Tokyo-30.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Pile of dead fish for sale at a market, close-up on heads, eyes and open mouths."
+    },
+    {
+      "file": "Oxalis_triangularis_Stereoscopy_Richard_Bartz.jpg",
+      "reason": "no-natural-up",
+      "note": "Extreme macro of a petal and stamens. The abstract composition has no up direction."
+    },
+    {
+      "file": "Parasol_oder_Riesenschirmpilz,_Macrolepiota_procera_3.JPG",
+      "reason": "no-natural-up",
+      "note": "Parasol mushroom cap seen straight from above. Circular, no upright."
+    },
+    {
+      "file": "Parque_Nacional_Marinho_de_Fernando_de_Noronha_-_João_Paulo_Marques_DAndretta_1-edited.jpg",
+      "reason": "no-natural-up",
+      "note": "Small fish on a reef wall with red sponge, no horizon. Uncertain."
+    },
+    {
+      "file": "Part_of_birch_trunk_in_Norrkila.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up texture of birch bark that fills the frame, with no context."
+    },
+    {
+      "file": "Pepino_de_mar_(Holothuria_fuscogilva),_parque_nacional_Ras_Muhammad,_Egipto,_2022-03-28,_DD_119.jpg",
+      "reason": "no-natural-up",
+      "note": "Sea cucumber shot from roughly above on reef. Uncertain."
+    },
+    {
+      "file": "Perez_2-_Phodopus_sungorus.jpg",
+      "reason": "no-natural-up",
+      "note": "A top-down shot of a hamster inside a plastic cage tube, with no clear up direction. It is also a low-quality snapshot."
+    },
+    {
+      "file": "Pez_cocodrilo_(Papilloculiceps_longiceps),_parque_nacional_Ras_Muhammad,_Egipto,_2022-03-27,_DD_71.jpg",
+      "reason": "no-natural-up",
+      "note": "Crocodilefish lying on sand, shot from above at a diagonal."
+    },
+    {
+      "file": "Pez_fuego_diablo_(Pterois_miles),_Temple,_Sharm_el-Sheij,_Egipto,_2022-03-26,_DD,_DD_20.jpg",
+      "reason": "no-natural-up",
+      "note": "Lionfish shot from directly above over reef."
+    },
+    {
+      "file": "Pink_dress_with_embroidery,_detail,_Crafts_Museum,_New_Delhi.jpg",
+      "reason": "no-natural-up",
+      "note": "Flat close-up texture of embroidered fabric."
+    },
+    {
+      "file": "Pinto_Beans_Seeds.jpg",
+      "reason": "no-natural-up",
+      "note": "Round pile of beans seen from directly above on white. Rotationally symmetric."
+    },
+    {
+      "file": "Pinus_taeda_29_NBG_LR.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up texture of pine bark and lichen that fills the frame."
+    },
+    {
+      "file": "Plasma-lamp.jpg",
+      "reason": "no-natural-up",
+      "note": "Near-radially symmetric plasma ball on black. The electrode stem is a weak cue (unsure)."
+    },
+    {
+      "file": "Plastic_Protractor_Polarized_05375.jpg",
+      "reason": "no-natural-up",
+      "note": "Abstract polarized-light macro of a protractor set diagonally."
+    },
+    {
+      "file": "Project_1164_Moskva_2012_G2.jpg",
+      "reason": "violence-or-weapon-focus",
+      "note": "Missile cruiser Moskva moored, with weapon systems visible. Ship sank in war with loss of life. Low-severity borderline, flagged because unsure."
+    },
+    {
+      "file": "Pulpo_común_(Octopus_vulgaris),_franja_marina_Teno-Rasca,_Tenerife,_España,_2022-01-08,_DD_53.jpg",
+      "reason": "no-natural-up",
+      "note": "Octopus spread on gravel, shot from above. Radial pose."
+    },
+    {
+      "file": "Qantas_Boeing_747-400_VH-OJU_over_Starbeyevo_Kustov.jpg",
+      "reason": "no-natural-up",
+      "note": "747 seen from below against a dark sky with contrails. No horizon, so orientation is ambiguous."
+    },
+    {
+      "file": "Quercus_robur_acorns_in_Tuntorp_1.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down acorn pile on a wooden board. Grain shows the axis but not which way is up. Borderline."
+    },
+    {
+      "file": "Rambutão.jpg",
+      "reason": "no-natural-up",
+      "note": "Rambutans filling the frame from above. Pure texture."
+    },
+    {
+      "file": "Raya_de_arrecife_(Taeniura_lymma),_Temple,_Sharm_el-Sheij,_Egipto,_2022-03-26,_DD_05.jpg",
+      "reason": "no-natural-up",
+      "note": "Pale stingray on white sand, shot from above."
+    },
+    {
+      "file": "Raya_de_arrecife_(Taeniura_lymma),_mar_Rojo,_Egipto,_2023-04-14,_DD_64.jpg",
+      "reason": "no-natural-up",
+      "note": "Stingray on sand, mostly top-down with only slight perspective. Uncertain."
+    },
+    {
+      "file": "Red_cherry_leaves_on_branches_in_Tuntorp.jpg",
+      "reason": "no-natural-up",
+      "note": "Shot looking straight up into the canopy, with branches and sky in every direction. Orientation is ambiguous."
+    },
+    {
+      "file": "Rode_wegslak_(Arion_rufus),_07-09-2024._(actm.).jpg",
+      "reason": "nudity-or-sexual",
+      "note": "Two red slugs mating with large white everted reproductive organs in focus. Mild, but it is animal sexual content, so it is the reviewer's call."
+    },
+    {
+      "file": "Rubio_rojo_(Chelidonichthys_spinosus),_Parque_natural_de_la_Arrábida,_Portugal,_2022-07-19,_DD_77.jpg",
+      "reason": "no-natural-up",
+      "note": "Gurnard with fins spread, shot from directly above."
+    },
+    {
+      "file": "Safety_boats,_ferry,_Aidipsos,_Evia_Greece.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up abstract pattern of orange lifeboat hulls. The only up cues are a slight rope sag and shadows (unsure)."
+    },
+    {
+      "file": "Savooi_voor_halogeenlamp.JPG",
+      "reason": "no-natural-up",
+      "note": "Backlit savoy cabbage leaf shown as an abstract texture."
+    },
+    {
+      "file": "Schlafmohn_Papaver_somniferum_2019-06-17_13-19-31_(C).jpg",
+      "reason": "no-natural-up",
+      "note": "Opium poppy centre seen from directly above. The radial macro has no orientation cue."
+    },
+    {
+      "file": "Sempervivum_montanum_-_close_up.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a houseleek rosette, a radial spiral that fills the frame."
+    },
+    {
+      "file": "Senf-Variationen.jpg",
+      "reason": "no-natural-up",
+      "note": "Six-panel collage of mustard spoons shot from above. Composite image with weak orientation cues. Borderline."
+    },
+    {
+      "file": "Sepiola_atlantica.jpg",
+      "reason": "no-natural-up",
+      "note": "Bobtail squid shot from above on black, specimen-style. No clear upright."
+    },
+    {
+      "file": "Shah_Mosque_(Isfahan).jpg",
+      "reason": "no-natural-up",
+      "note": "Looking straight up into the tiled dome and arches. There is no ground in frame."
+    },
+    {
+      "file": "Shimano_Hyperglide_cassette_8-speed_CS-HG51_11-32.jpg",
+      "reason": "no-natural-up",
+      "note": "Circular bike cassette shot face-on against black, rotationally symmetric."
+    },
+    {
+      "file": "Shoe_trees.jpg",
+      "reason": "no-natural-up",
+      "note": "Repeating rows of shoe trees filling the frame, like a texture with an ambiguous orientation."
+    },
+    {
+      "file": "Shortnose_greeneye_Chlorophthalmus_agassizi.jpg",
+      "reason": "not-a-photo",
+      "note": "Composite scientific plate: two fish on black, one in white light and one under biofluorescence. Possibly a lab specimen. Uncertain."
+    },
+    {
+      "file": "Sparkler.JPG",
+      "reason": "no-natural-up",
+      "note": "Abstract sparkler bursting on black, with no up."
+    },
+    {
+      "file": "Spider_and_mites_May_2008-1.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down view of a crab spider in the center of a flower, with red mites. Orientation is ambiguous, and the white feathery object at its front legs may be prey."
+    },
+    {
+      "file": "Spider_web_Luc_Viatour.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up of a dew-covered web on black; an abstract pattern. Only hanging droplets give a weak up cue."
+    },
+    {
+      "file": "St_John_the_Baptist_Cathedral_Tower,_Norwich,_Norfolk,_UK_-_Diliff.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure. Mostly an upward view into the tower vault; only the rood crucifix at the lower edge hints at orientation."
+    },
+    {
+      "file": "Steelport_6-Inch_Chef_Knife_(2026)-104A7331.jpg",
+      "reason": "no-natural-up",
+      "note": "Chef's knife lying on a stone texture, shot from above. It is a kitchen product shot, not a weapon focus."
+    },
+    {
+      "file": "Taxus_uitgezaaid_in_een_knotwilg._28-07-2019._(d.j.b)._08.jpg",
+      "reason": "no-natural-up",
+      "note": "Bark texture fills the frame. The small yew seedling gives only a weak up cue. Borderline."
+    },
+    {
+      "file": "Times_Square_Ball_from_above.jpg",
+      "reason": "no-natural-up",
+      "note": "Looking straight down from the top of the pole, with the photographer's feet at the bottom. Mostly a top-down vertigo view; the feet are the only weak cue for which way is up."
+    },
+    {
+      "file": "Traditional_Moroccan_shoes_called_\"babouches\".JPG",
+      "reason": "no-natural-up",
+      "note": "Dense, repeating pattern of slippers with an ambiguous orientation (unsure)."
+    },
+    {
+      "file": "Underside_of_expanded_bluefire_jellyfish_in_Brofjorden_at_Sandvik_57.jpg",
+      "reason": "no-natural-up",
+      "note": "Jellyfish seen from below. Orientation is ambiguous."
+    },
+    {
+      "file": "Underwater_slope_in_Gullmarn_fjord_2.jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: underwater view of waving plants; only a weak gradient hints at up"
+    },
+    {
+      "file": "Vegetarian_Pizza.jpg",
+      "reason": "no-natural-up",
+      "note": "Pizza on a round plate shot straight down. No reliable up."
+    },
+    {
+      "file": "Vicinity_of_Pigeon_Point_Lighthouse.jpg",
+      "reason": "dead-or-injured-animal",
+      "note": "Pale, limp octopus sprawled in the tide-pool foreground. Probably dead or dying (unsure)."
+    },
+    {
+      "file": "Vincent_van_Gogh_-_Sunflowers_-_VGM_F458.jpg",
+      "reason": "not-a-photo",
+      "note": "Reproduction of Van Gogh's Sunflowers painting."
+    },
+    {
+      "file": "Viperine_water_snake_(Natrix_maura).jpg",
+      "reason": "no-natural-up",
+      "note": "Unsure: snake swimming, seen top-down on rippled water; no horizon"
+    },
+    {
+      "file": "Viscum_album_section_2011_G1.jpg",
+      "reason": "not-a-photo",
+      "note": "Scan of a cut lab specimen (a mistletoe section) on white, with a scale bar. It reads as a scientific figure and has no natural up beyond the scale-bar text. Borderline."
+    },
+    {
+      "file": "VitorJubini_MercadoDaVilaRubim_Vitoria_ES_(39182859020)_(square_crop).jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down mass of red chillies with a bowl, square crop. Texture with no orientation."
+    },
+    {
+      "file": "Wooden_head.jpg",
+      "reason": "no-natural-up",
+      "note": "Close-up texture of weathered wood grain with knots, with no orientation cues."
+    },
+    {
+      "file": "Yellow_leaves_floating_next_to_water_volcano,_Alameda_dos_Oceanos,_Parque_das_Nações,_Lisbon,_Portugal_julesvernex2.jpg",
+      "reason": "no-natural-up",
+      "note": "Top-down shot of oak leaves on a tiled surface"
+    },
+    {
+      "file": "Личинка_белокрылки.jpg",
+      "reason": "no-natural-up",
+      "note": "Microscopy-style top-down shot of a whitefly larva on a leaf surface; no natural up."
+    },
+    {
+      "file": "Спасо-преображенський_собор_в_Одесі_після_влучання_ракети_07.jpg",
+      "reason": "disturbing-other",
+      "note": "Odesa cathedral interior after a missile strike: war damage, rubble, and a worker clearing debris. May upset a general audience. No injuries shown."
+    }
+  ]
+}

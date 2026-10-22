@@ -1,0 +1,9 @@
+id: no-comments
+valid:
+  - "const url = 'https://example.com/a';"
+  - "const shader = `// inside a string`;"
+  - "function run(): void {}"
+invalid:
+  - "// explain\nconst value = 1;"
+  - "const value = 1; /* note */"
+  - "/** docs */\nexport function run(): void {}"

@@ -53,18 +53,37 @@ model's lower accuracy is a deliberate size tradeoff.
 ## Runtime
 
 - ONNX Runtime Web 1.23.2, WASM execution provider.
-- Single-thread WASM for static hosting without cross-origin isolation.
-- Model download: 11.9MB.
+- Single-thread WASM in each worker, so the site needs no cross-origin
+  isolation. A pool of up to four workers (two on phones and low-memory
+  devices) judges several photos at once.
+- Model download: 11.9MB, served with the site from `model/`.
 - Measurement is shown per image in the UI.
+- This is the demo's default model. Browsers with WebGPU can switch to the full
+  `v2.0.0` ensemble instead; that model has its own
+  [model card](../MODEL_CARD.md).
+- In the browser, the full ensemble reproduces the CLI's Pillow bilinear resize
+  exactly for photos up to 2,048 px on the long side. Larger photos are first
+  shrunk to 2,048 px by the browser to save time and memory, so borderline
+  photos can occasionally differ from the CLI. On 24 test cases from 13–33 MP
+  photos every prediction still matched.
+
+## Inputs
+
+The browser decodes JPEG, PNG, WebP, GIF, AVIF and BMP, and HEIC where it
+supports it. For DNG, NEF, NRW, ARW and CR2 files the demo judges only the JPEG
+preview embedded in the file; the RAW data itself is never decoded. Every image
+is resized to 224×224 as a whole, so the model sees the full frame.
 
 ## License
 
 Model derivatives are based on Apache-2.0 timm MobileNetV4 weights. The demo
-code is MIT. ONNX Runtime Web is MIT. Exact project notices and upstream
-provenance are included in the build.
+code is MIT. ONNX Runtime Web is MIT. The Apache-2.0 text
+(`licenses/Apache-2.0.txt`), the upstream model cards, configs and provenance
+(`model/upstream-*`, `model/provenance.json`), and the ONNX Runtime license
+and notices (`ort/`) ship with the site.
 
 ## Limits
 
-This is not calibrated confidence, arbitrary-angle correction, HEIC/RAW support,
-or a replacement for the full CLI. The browser controls supported input
-formats. The test labels remain provisional and the test set is small.
+This is not calibrated confidence, arbitrary-angle correction, RAW decoding,
+or a replacement for the full CLI. HEIC works only where the browser decodes
+it. The test labels remain provisional and the test set is small.

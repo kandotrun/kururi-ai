@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>くるりAI RAW 読み込み検証</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #173a30;
+        color: #e9f0ec;
+        font:
+          13px/1.6 "Hiragino Sans",
+          "Hiragino Kaku Gothic ProN",
+          "Noto Sans JP",
+          system-ui,
+          sans-serif;
+      }
+
+      main {
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+      }
+
+      #status {
+        font-variant-numeric: tabular-nums;
+        white-space: pre-wrap;
+      }
+
+      canvas {
+        display: block;
+        max-width: 100%;
+        background: #2b5a4a;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <label>
+        フォルダ
+        <input id="pick" type="file" webkitdirectory multiple />
+      </label>
+      <div id="status">待機中</div>
+      <canvas id="sheet" width="1200" height="40"></canvas>
+    </main>
+    <script type="module" src="./raw-harness.ts"></script>
+  </body>
+</html>

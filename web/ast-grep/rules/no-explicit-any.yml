@@ -1,0 +1,11 @@
+id: no-explicit-any
+language: TypeScript
+severity: error
+rule:
+  kind: predefined_type
+  regex: ^any$
+message: Do not use any. Use unknown with a type guard or a precise type.
+files:
+  - "src/**/*.ts"
+  - "tests/**/*.ts"
+  - "dev/**/*.ts"

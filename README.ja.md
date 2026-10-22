@@ -14,7 +14,7 @@ AppleシリコンのMacかLinux（x86-64）のターミナルで使うコマン�
 [![Code license: MIT](https://img.shields.io/badge/code%20license-MIT-2B5A4A)](LICENSE)
 [![DeepWiki](https://img.shields.io/badge/DeepWiki-kandotrun%2Fkururi--ai-2B5A4A)](https://deepwiki.com/kandotrun/kururi-ai)
 
-**[ブラウザで試す](https://kandotrun.github.io/kururi-ai/)**&emsp;**[v2.0.0をダウンロード](#ダウンロード)**&emsp;**[クイックスタート](#クイックスタート)**&emsp;[Read in English](README.md)
+**[ブラウザで試す](https://kururi-ai.2-38.com/)**&emsp;**[v2.0.0をダウンロード](#ダウンロード)**&emsp;**[クイックスタート](#クイックスタート)**&emsp;[Read in English](README.md)
 
 </div>
 
@@ -206,12 +206,11 @@ jq -r '.results[] | select(.error or .correction_cw != 0) | "\(.correction_cw //
 
 ## ブラウザデモ
 
-[kandotrun.github.io/kururi-ai](https://kandotrun.github.io/kururi-ai/) では、約11.9MBの軽量モデル **v2-nano** を、ONNX Runtime Webでブラウザの中だけで動かします。写真はどこにも送信されません。
+[kururi-ai.2-38.com](https://kururi-ai.2-38.com/) では、くるりAIをブラウザの中の3Dの作業机で動かします。宇宙から東京へ降りていく短いオープニングのあと、Wikimedia Commonsの特選写真約2,800枚がわざと回転させた状態で机に並び、モデルが1枚ずつ正しい向きに直していきます。自分の写真やフォルダごとの写真も並べられます（DNGやNEFなどのRAWは、ファイルに入っているJPEGプレビューで判定します）。写真はどこにも送信されません。
 
-お試し用なので、たくさんの写真を本格的に直す用途には向きません。
-
-- 補正結果を画面で確認するだけで、ファイルとして保存する機能はありません。
-- 軽量なぶん精度は下がります。デモ用モデル向けの小さなテストでの正解率は396件中324件（81.82%）です。テストの条件が違うため、このページの表の数値とは直接比べられません。
+- 最初は約11.9MBの軽量モデル **v2-nano**（ONNX Runtime Web）で判定します。軽量なぶん精度は下がり、デモ用モデル向けの小さなテストでの正解率は396件中324件（81.82%）です。テストの条件が違うため、このページの表の数値とは直接比べられません。
+- WebGPUに対応したブラウザでは、フル版 **v2.0.0** に切り替えられます（約551MBと、続けて約199MBの補助モデル）。一度読み込むとブラウザに保存されます。
+- 画面に出る正解率は、このデモで使う公開写真での目安で、ベンチマークではありません。補正した写真をファイルとして保存する機能はありません。
 
 手元の写真を直すときはコマンド版を使ってください。デモの詳細は [web/README.md](web/README.md) にあります。
 

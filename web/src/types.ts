@@ -1,8 +1,18 @@
-export interface InitRequest {
+export interface NanoInitRequest {
   type: "init";
-  models: Array<{ url: string; weight: number }>;
+  engine: "nano";
+  models: Array<{ bytes: ArrayBuffer; weight: number }>;
   wasmBaseUrl: string;
 }
+
+export interface FullInitRequest {
+  type: "init";
+  engine: "full";
+  baseUrl: string;
+  wasmBaseUrl: string;
+}
+
+export type InitRequest = NanoInitRequest | FullInitRequest;
 
 export interface ProcessRequest {
   type: "process";
@@ -17,8 +27,6 @@ export interface ProgressMessage {
   type: "load-progress";
   loaded: number;
   total: number;
-  modelIndex: number;
-  modelCount: number;
 }
 
 export interface ReadyMessage {

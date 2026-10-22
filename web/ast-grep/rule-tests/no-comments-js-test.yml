@@ -1,0 +1,7 @@
+id: no-comments-js
+valid:
+  - "const url = 'https://example.com/a';"
+  - "await fetch(url);"
+invalid:
+  - "// explain\nconst value = 1;"
+  - "const value = 1; /* note */"
