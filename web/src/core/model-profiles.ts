@@ -4,7 +4,9 @@ export const NANO_BYTES = 11_908_441;
 export const FULL_GENERAL_BYTES = 551_055_739;
 export const FULL_FALLBACK_BYTES = 199_309_562;
 
-const NO_WEBGPU = "このブラウザは WebGPU に対応していないため使えません。";
+const NO_WEBGPU = "このブラウザは WebGPU に対応していないため使えません";
+const NO_WEBGPU_FALLBACK =
+  "このブラウザは WebGPU に対応していないため、軽量モデルで判定します。";
 
 export interface ModelEnvironment {
   webgpu: boolean;
@@ -56,6 +58,8 @@ export function resolveModel(
   }
   return {
     model: "nano",
-    notice: `高精度モデルは使えないため、軽量モデルで判定します。${option.unavailableReason ?? ""}`,
+    notice: option.needsWebGPU
+      ? NO_WEBGPU_FALLBACK
+      : "高精度モデルは使えないため、軽量モデルで判定します。",
   };
 }

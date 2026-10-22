@@ -1,4 +1,4 @@
-import type { GeoPoint } from "../src/contracts";
+import type { GeoPoint, ViewInsets } from "../src/contracts";
 import { decodeManifest } from "../src/core/manifest";
 import { mulberry32 } from "../src/core/random";
 import {
@@ -21,6 +21,7 @@ interface IntroHarness {
   readonly origins: number;
   readonly source: string;
   seek(ms: number): void;
+  setInsets(insets: ViewInsets): void;
   skip(): void;
   stats(): IntroFrameStats;
   resetStats(): void;
@@ -94,6 +95,7 @@ async function manifestOrigins(): Promise<GeoPoint[]> {
 
 interface DeskHandle {
   hide(hidden: boolean): void;
+  setInsets(insets: ViewInsets): void;
 }
 
 async function mountDesk(stage: HTMLElement): Promise<DeskHandle | null> {
@@ -120,6 +122,9 @@ async function mountDesk(stage: HTMLElement): Promise<DeskHandle | null> {
     return {
       hide(hidden: boolean) {
         canvas.style.visibility = hidden ? "hidden" : "visible";
+      },
+      setInsets(insets: ViewInsets) {
+        scene.setViewInsets(insets);
       },
     };
   } catch (error) {
@@ -210,6 +215,7 @@ async function main(): Promise<void> {
     origins: origins.length,
     source,
     seek: (ms: number) => controller.seek(ms),
+    setInsets: (value: ViewInsets) => desk?.setInsets(value),
     skip: () => controller.skip(),
     stats: () => controller.frameStats(),
     resetStats: () => controller.resetStats(),

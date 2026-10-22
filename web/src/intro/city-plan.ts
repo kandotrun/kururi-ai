@@ -23,12 +23,20 @@ export const HERO = {
   bay: 3.2,
 } as const;
 
+export const PORTAL_SCALE = 4.8;
+export const HERO_FRAME = 0.1;
+
+export const HERO_GLASS = {
+  width: 13 / PORTAL_SCALE,
+  height: 9.6 / PORTAL_SCALE,
+} as const;
+
 export const HERO_WINDOW = {
   x: 1.6,
   y: 7 * FLOOR_HEIGHT + FLOOR_HEIGHT * 0.5,
   z: HERO.maxZ + 0.04,
-  width: 2.5,
-  height: 2.2,
+  width: HERO_GLASS.width + 2 * HERO_FRAME,
+  height: HERO_GLASS.height + 2 * HERO_FRAME,
 } as const;
 
 export const CORRIDOR = {

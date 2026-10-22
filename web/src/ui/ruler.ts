@@ -9,11 +9,17 @@ import {
 
 const NUMERAL_STEP = 100;
 
+export interface RulerOptions {
+  onReload(): void;
+}
+
 export interface RulerView {
   readonly element: HTMLElement;
   setStats(stats: DeskStats): void;
   setState(text: string): void;
+  setReloadable(reloadable: boolean): void;
   setNotice(text: string | null): void;
+  repeatNotice(): void;
   dispose(): void;
 }
 
@@ -40,18 +46,30 @@ function stat(
   return { element, value, extra };
 }
 
-export function createRuler(): RulerView {
+export function createRuler(options: RulerOptions): RulerView {
   const fill = h("span", { class: "ruler-fill", "aria-hidden": "true" });
   const numerals = h("span", { class: "ruler-numerals", "aria-hidden": "true" });
-  const notice = h("p", { class: "ruler-notice", hidden: true });
+  const notice = h("p", {
+    class: "ruler-notice",
+    role: "status",
+    "aria-live": "polite",
+  });
   const scale = h("div", { class: "ruler-scale" }, [fill, numerals]);
   const judged = stat("judged", "判定", null, true);
-  const fixed = stat("fixed", "回した", null, false);
+  const fixed = stat("fixed", "向きを変えた", null, false);
   const correct = stat("correct", "正解", null, true);
   const rate = stat("rate", null, "枚/秒", false);
   const ms = stat("ms", "1枚", "ms", false);
+  const stateText = h("span", { class: "stat-state-text" }, ["モデルを準備中"]);
+  const reload = h(
+    "button",
+    { type: "button", class: "text-button ruler-reload", hidden: true },
+    ["再読み込み"],
+  );
+  reload.addEventListener("click", () => options.onReload());
   const state = h("p", { class: "stat stat-state", "data-key": "state" }, [
-    "モデルを準備中",
+    stateText,
+    reload,
   ]);
   const row = h("div", { class: "ruler-stats" }, [
     judged.element,
@@ -97,6 +115,8 @@ export function createRuler(): RulerView {
   layoutNumerals(window.innerWidth);
 
   let progress = -1;
+  let noticeText: string | null = null;
+  let repeatFrame = 0;
 
   return {
     element,
@@ -119,15 +139,34 @@ export function createRuler(): RulerView {
       setText(ms.value, formatMs(stats.medianMs));
     },
     setState(text) {
-      setText(state, text);
+      setText(stateText, text);
+    },
+    setReloadable(reloadable) {
+      reload.hidden = !reloadable;
     },
     setNotice(text) {
-      notice.hidden = text === null;
+      noticeText = text;
+      window.cancelAnimationFrame(repeatFrame);
+      repeatFrame = 0;
       setText(notice, text ?? "");
       element.toggleAttribute("data-notice", text !== null);
     },
+    repeatNotice() {
+      if (noticeText === null || repeatFrame !== 0) {
+        return;
+      }
+      const text = noticeText;
+      setText(notice, "");
+      repeatFrame = window.requestAnimationFrame(() => {
+        repeatFrame = 0;
+        if (noticeText === text) {
+          setText(notice, text);
+        }
+      });
+    },
     dispose() {
       observer?.disconnect();
+      window.cancelAnimationFrame(repeatFrame);
     },
   };
 }

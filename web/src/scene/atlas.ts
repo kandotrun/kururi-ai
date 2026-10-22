@@ -17,19 +17,21 @@ export interface AtlasRect {
   aspect: number;
 }
 
+type StagingCanvas = HTMLCanvasElement | OffscreenCanvas;
+type StagingContext =
+  CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
 interface AtlasPage {
   glTexture: WebGLTexture | null;
   texture: ExternalTexture;
   dirty: boolean;
   lastMipmap: number;
+  copy: StagingContext | null;
 }
-
-type StagingCanvas = HTMLCanvasElement | OffscreenCanvas;
-type StagingContext =
-  CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 const MIPMAP_INTERVAL = 0.25;
 const MAX_ANISOTROPY = 8;
+export const ATLAS_COPY_SCALE = 0.5;
 
 export const DESKTOP_ATLAS: AtlasSpec = {
   cellWidth: 128,
@@ -69,6 +71,28 @@ function stagingContext(canvas: StagingCanvas): StagingContext {
   return context;
 }
 
+function copyContext(width: number, height: number): StagingContext | null {
+  try {
+    const canvas = createStaging(width, height);
+    const context = canvas.getContext("2d", {
+      alpha: false,
+      willReadFrequently: true,
+    });
+    return context && "drawImage" in context && "setTransform" in context
+      ? context
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function releaseCanvas(context: StagingContext | null): void {
+  if (context) {
+    context.canvas.width = 1;
+    context.canvas.height = 1;
+  }
+}
+
 export class PrintAtlas {
   readonly spec: AtlasSpec;
   readonly pageWidth: number;
@@ -102,6 +126,49 @@ export class PrintAtlas {
 
   markLost(): void {
     this.lost = true;
+  }
+
+  restore(now: number): void {
+    this.lost = false;
+    if (this.anisotropy > 1) {
+      this.gl.getExtension("EXT_texture_filter_anisotropic");
+    }
+    let full: StagingContext | null = null;
+    for (const page of this.pages) {
+      page.glTexture = this.createTexture();
+      page.texture.sourceTexture = page.glTexture;
+      page.dirty = false;
+      page.lastMipmap = Number.NEGATIVE_INFINITY;
+      if (!page.glTexture || !page.copy) {
+        continue;
+      }
+      full ??= copyContext(this.pageWidth, this.pageHeight);
+      if (!full) {
+        continue;
+      }
+      full.setTransform(1, 0, 0, 1, 0, 0);
+      full.imageSmoothingEnabled = true;
+      full.imageSmoothingQuality = "high";
+      full.drawImage(page.copy.canvas, 0, 0, this.pageWidth, this.pageHeight);
+      const gl = this.gl;
+      this.renderer.state.bindTexture(gl.TEXTURE_2D, page.glTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        this.pageWidth,
+        this.pageHeight,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        full.canvas,
+      );
+      this.regenerate(page, now);
+    }
+    releaseCanvas(full);
   }
 
   page(index: number): ExternalTexture {
@@ -162,6 +229,9 @@ export class PrintAtlas {
       context.setTransform(1, 0, 0, 1, 0, 0);
     }
     context.setTransform(1, 0, 0, 1, 0, 0);
+    if (page) {
+      this.keepCopy(page, originX, originY);
+    }
     if (page && page.glTexture && !this.lost) {
       const gl = this.gl;
       this.renderer.state.bindTexture(gl.TEXTURE_2D, page.glTexture);
@@ -224,8 +294,32 @@ export class PrintAtlas {
       if (!this.lost && page.glTexture) {
         this.gl.deleteTexture(page.glTexture);
       }
+      releaseCanvas(page.copy);
+      page.copy = null;
     }
     this.pages.length = 0;
+  }
+
+  private keepCopy(page: AtlasPage, originX: number, originY: number): void {
+    page.copy ??= copyContext(
+      Math.ceil(this.pageWidth * ATLAS_COPY_SCALE),
+      Math.ceil(this.pageHeight * ATLAS_COPY_SCALE),
+    );
+    const copy = page.copy;
+    if (!copy) {
+      return;
+    }
+    const { cellWidth, cellHeight } = this.spec;
+    copy.setTransform(1, 0, 0, 1, 0, 0);
+    copy.imageSmoothingEnabled = true;
+    copy.imageSmoothingQuality = "high";
+    copy.drawImage(
+      this.staging,
+      originX * ATLAS_COPY_SCALE,
+      originY * ATLAS_COPY_SCALE,
+      cellWidth * ATLAS_COPY_SCALE,
+      cellHeight * ATLAS_COPY_SCALE,
+    );
   }
 
   private drawFitted(
@@ -259,15 +353,21 @@ export class PrintAtlas {
   }
 
   private allocate(): AtlasPage {
+    const glTexture = this.createTexture();
+    return {
+      glTexture,
+      texture: new ExternalTexture(glTexture),
+      dirty: false,
+      lastMipmap: Number.NEGATIVE_INFINITY,
+      copy: null,
+    };
+  }
+
+  private createTexture(): WebGLTexture | null {
     const gl = this.gl;
     const glTexture = this.lost ? null : gl.createTexture();
     if (!glTexture) {
-      return {
-        glTexture: null,
-        texture: new ExternalTexture(null),
-        dirty: false,
-        lastMipmap: Number.NEGATIVE_INFINITY,
-      };
+      return null;
     }
     this.renderer.state.bindTexture(gl.TEXTURE_2D, glTexture);
     const levels =
@@ -290,12 +390,7 @@ export class PrintAtlas {
     if (this.anisotropy > 1) {
       gl.texParameterf(gl.TEXTURE_2D, 0x84fe, this.anisotropy);
     }
-    return {
-      glTexture,
-      texture: new ExternalTexture(glTexture),
-      dirty: false,
-      lastMipmap: Number.NEGATIVE_INFINITY,
-    };
+    return glTexture;
   }
 }
 

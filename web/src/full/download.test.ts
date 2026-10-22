@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssetCache } from "./cache";
-import { downloadAssets, sha256Hex } from "./download";
+import { downloadAssets, prefetchAssets, sha256Hex } from "./download";
 import type { EnsembleAsset } from "./ensemble-manifest";
 
 const BASE = "https://models.example/v2/";
@@ -279,5 +279,145 @@ describe("downloadAssets", () => {
     ).rejects.toThrow("HTTP 500");
     expect(signals.length).toBe(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+});
+
+describe("prefetchAssets", () => {
+  it("stores missing files in the cache and keeps none of their bytes", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect(kept).toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(Array.from(cache.entries.get(`${BASE}model.onnx.data`)!)).toEqual([
+      5, 6, 7, 8, 9, 10,
+    ]);
+  });
+
+  it("leaves files that are already cached unread", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    cache.entries.set(`${BASE}model.onnx`, graphBytes);
+    cache.entries.set(`${BASE}model.onnx.data`, weightBytes);
+    let reads = 0;
+    const match = cache.match.bind(cache);
+    cache.match = async (url) => {
+      const found = await match(url);
+      return found
+        ? new Response(
+            new ReadableStream(
+              {
+                pull() {
+                  reads += 1;
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          )
+        : undefined;
+    };
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect(kept).toBeNull();
+    expect(calls).toEqual([]);
+    expect(reads).toBe(0);
+  });
+
+  it("fetches only the files the cache is missing", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    cache.entries.set(`${BASE}model.onnx`, graphBytes);
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect(kept).toBeNull();
+    expect(calls.map((call) => call.url)).toEqual([`${BASE}model.onnx.data`]);
+  });
+
+  it("replaces a cached copy of the wrong length", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    cache.entries.set(`${BASE}model.onnx`, graphBytes);
+    cache.entries.set(`${BASE}model.onnx.data`, bytes(5, 6, 7));
+    const match = cache.match.bind(cache);
+    cache.match = async (url) => {
+      const found = await match(url);
+      const stored = cache.entries.get(url);
+      return found && stored
+        ? new Response(found.body, {
+            headers: { "content-length": String(stored.length) },
+          })
+        : found;
+    };
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect(kept).toBeNull();
+    expect(calls.map((call) => call.url)).toEqual([`${BASE}model.onnx.data`]);
+    expect(Array.from(cache.entries.get(`${BASE}model.onnx.data`)!)).toEqual([
+      5, 6, 7, 8, 9, 10,
+    ]);
+  });
+
+  it("hands every file back when there is no cache", async () => {
+    const { fetcher } = server(publishedFiles());
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache: null,
+      digest: sha256Hex,
+    });
+    expect([...(kept?.keys() ?? [])]).toEqual(["model.onnx", "model.onnx.data"]);
+  });
+
+  it("hands every file back when the cache has no room", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    cache.writable = false;
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect([...(kept?.keys() ?? [])]).toEqual(["model.onnx", "model.onnx.data"]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("hands every file back, cached ones included, when storing fails", async () => {
+    const { calls, fetcher } = server(publishedFiles());
+    const cache = new MemoryCache();
+    cache.entries.set(`${BASE}model.onnx`, graphBytes);
+    cache.failPuts = true;
+    const kept = await prefetchAssets(await release(), BASE, {
+      fetcher,
+      cache,
+      digest: sha256Hex,
+    });
+    expect(Array.from(kept?.get("model.onnx") ?? [])).toEqual([1, 2, 3, 4]);
+    expect(Array.from(kept?.get("model.onnx.data") ?? [])).toEqual([
+      5, 6, 7, 8, 9, 10,
+    ]);
+    expect(calls.map((call) => call.url)).toEqual([`${BASE}model.onnx.data`]);
+  });
+
+  it("passes download failures on", async () => {
+    const { fetcher } = server({});
+    await expect(
+      prefetchAssets(await release(), BASE, {
+        fetcher,
+        cache: new MemoryCache(),
+        digest: sha256Hex,
+      }),
+    ).rejects.toThrow("HTTP 404");
   });
 });

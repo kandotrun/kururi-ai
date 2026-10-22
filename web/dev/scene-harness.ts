@@ -4,8 +4,11 @@ import { mulberry32, type Random } from "../src/core/random";
 import { expectedCorrection, pickSimulated } from "../src/core/rotation";
 import {
   createDeskScene,
+  type DeskContextState,
   deskSceneProject,
   deskSceneStats,
+  onDeskSceneContext,
+  setDeskSettled,
   WebGLUnavailableError,
 } from "../src/scene/desk-scene";
 
@@ -75,6 +78,9 @@ interface HarnessProgress {
   screenPosition(id: string): { x: number; y: number } | null;
   stats(): unknown;
   loseContext(): boolean;
+  restoreContext(): boolean;
+  contextStates: DeskContextState[];
+  finishedAt: number;
   dispose(): void;
 }
 
@@ -409,6 +415,9 @@ const progress: HarnessProgress = {
   screenPosition: () => null,
   stats: () => null,
   loseContext: () => false,
+  restoreContext: () => false,
+  contextStates: [],
+  finishedAt: 0,
   dispose: () => undefined,
 };
 window.__harness = progress;
@@ -640,15 +649,26 @@ async function run(): Promise<void> {
   progress.screenPosition = (id) => scene.screenPosition(id);
   progress.stats = () => deskSceneStats(scene);
   progress.measure = (seconds) => measureFrames(scene, seconds);
+  const loseExtension = canvas
+    .getContext("webgl2")
+    ?.getExtension("WEBGL_lose_context");
   progress.loseContext = () => {
-    const context = canvas.getContext("webgl2");
-    const extension = context?.getExtension("WEBGL_lose_context");
-    if (!extension) {
+    if (!loseExtension) {
       return false;
     }
-    extension.loseContext();
+    loseExtension.loseContext();
     return true;
   };
+  progress.restoreContext = () => {
+    if (!loseExtension) {
+      return false;
+    }
+    loseExtension.restoreContext();
+    return true;
+  };
+  onDeskSceneContext(scene, (state) => {
+    progress.contextStates.push(state);
+  });
   progress.dispose = () => scene.dispose();
   progress.ready = true;
 
@@ -672,6 +692,9 @@ async function run(): Promise<void> {
   const visitorQueue: { index: number; source: HarnessSource }[] = [];
   let visitorSerial = 0;
   progress.addVisitors = (count) => {
+    if (count > 0) {
+      setDeskSettled(scene, false);
+    }
     for (let step = 0; step < count; step += 1) {
       const sample = SAMPLES[visitorSerial % SAMPLES.length];
       const index = 100_000 + visitorSerial;
@@ -851,6 +874,8 @@ async function run(): Promise<void> {
   }
   await Promise.all(pending);
   progress.finished = true;
+  progress.finishedAt = performance.now();
+  setDeskSettled(scene, true);
   if (autoScatter) {
     await wait(600);
     await progress.scatter();

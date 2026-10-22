@@ -1,10 +1,12 @@
 import type { ModelId, ModelOption } from "../contracts";
 import type { ConfirmSlipView } from "./confirm-slip";
-import { modelOptionText, modelSwitch, switchConfirmText } from "./copy";
+import {
+  modelOptionText,
+  modelSwitch,
+  sentenceOf,
+  switchConfirmContent,
+} from "./copy";
 import { h, setText } from "./dom";
-
-const SWITCH_NOTE =
-  "切り替えるとページを開き直し、最初から並べ直します。";
 
 export interface ModelPickerOptions {
   confirm: ConfirmSlipView;
@@ -15,6 +17,7 @@ export interface ModelPickerView {
   readonly element: HTMLFieldSetElement;
   set(current: ModelId, options: readonly ModelOption[]): void;
   setNote(text: string): void;
+  ask(option: ModelOption): Promise<boolean>;
 }
 
 interface OptionRow {
@@ -53,35 +56,22 @@ export function createModelPicker(options: ModelPickerOptions): ModelPickerView 
     checked?.input.focus({ preventScroll: true });
   }
 
+  function ask(option: ModelOption): Promise<boolean> {
+    return options.confirm.ask(switchConfirmContent(option), element);
+  }
+
   function choose(row: OptionRow): void {
-    const plan = modelSwitch(current, row.option);
-    if (plan === "none") {
-      sync();
-      return;
-    }
-    if (plan === "switch") {
-      options.onSelect(row.option.id);
-      return;
-    }
     sync();
-    void options.confirm
-      .ask(
-        {
-          title: `${row.option.label}モデルに切り替えますか`,
-          body: switchConfirmText(row.option),
-          note: SWITCH_NOTE,
-          confirmLabel: "読み込む",
-          cancelLabel: "やめる",
-        },
-        element,
-      )
-      .then((confirmed) => {
-        if (confirmed) {
-          row.input.checked = true;
-          options.onSelect(row.option.id);
-        }
-        focusChecked();
-      });
+    if (modelSwitch(current, row.option) === "none") {
+      return;
+    }
+    void ask(row.option).then((confirmed) => {
+      if (confirmed) {
+        row.input.checked = true;
+        options.onSelect(row.option.id);
+      }
+      focusChecked();
+    });
   }
 
   function buildRow(option: ModelOption): OptionRow {
@@ -138,7 +128,7 @@ export function createModelPicker(options: ModelPickerOptions): ModelPickerView 
           .filter((option) => !option.available)
           .map((option) =>
             h("p", { class: "model-reason", id: `model-${option.id}-reason` }, [
-              option.unavailableReason ?? "このブラウザでは使えません。",
+              sentenceOf(option.unavailableReason ?? "このブラウザでは使えません"),
             ]),
           ),
       );
@@ -154,5 +144,6 @@ export function createModelPicker(options: ModelPickerOptions): ModelPickerView 
       note = text;
       sync();
     },
+    ask,
   };
 }

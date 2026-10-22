@@ -109,6 +109,7 @@ input {
   position: fixed;
   inset: 0;
   overflow: hidden;
+  overflow: clip;
   background: var(--mat-deep);
 }
 
@@ -318,10 +319,30 @@ input {
   flex-direction: column;
   align-items: flex-start;
   align-self: start;
-  gap: 26px;
   min-height: 0;
+  max-height: 100%;
   max-width: calc(34rem + 2 * var(--gutter));
   padding: clamp(8px, 3.4vh, 40px) var(--gutter) 0;
+}
+
+.stage-scroll {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 26px;
+  min-height: 0;
+  max-width: 100%;
+}
+
+.stage-scroll[data-scrolls] {
+  margin: 0 -10px;
+  padding: 0 10px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(141 184 166 / 0.45) transparent;
 }
 
 .stage::before {
@@ -671,9 +692,15 @@ input {
 
 .model-meta,
 .model-note {
-  color: var(--chalk-soft);
-  font: 400 11.5px/1.5 var(--font-ui);
+  color: #bfd6cb;
+  font: 400 12px/1.5 var(--font-ui);
   font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-shadow:
+    0 0 2px rgb(var(--shadow) / 0.95),
+    0 1px 3px rgb(var(--shadow) / 0.85),
+    0 0 12px rgb(var(--shadow) / 0.6);
 }
 
 .model-note {
@@ -862,6 +889,15 @@ input {
   transition: none;
 }
 
+.overlay[data-revealing]::before,
+.overlay[data-revealing]::after,
+.overlay[data-revealing] .stage::before,
+.overlay[data-revealing] .intro,
+.overlay[data-revealing] .actions,
+.overlay[data-revealing] .ruler {
+  transition-delay: 1000ms;
+}
+
 .skip-intro {
   appearance: none;
   position: absolute;
@@ -884,7 +920,6 @@ input {
   text-shadow:
     0 1px 3px rgb(0 0 0 / 0.7),
     0 0 14px rgb(0 0 0 / 0.55);
-  opacity: 0.8;
   cursor: pointer;
   animation: skip-in 600ms var(--ease-out) 900ms both;
   transition:
@@ -892,9 +927,19 @@ input {
     text-decoration-color 160ms ease;
 }
 
+.skip-intro::before {
+  content: "";
+  position: absolute;
+  inset: 7px -4px;
+  z-index: -1;
+  border-radius: 999px;
+  background: rgb(6 14 11 / 0.52);
+  filter: blur(7px);
+  pointer-events: none;
+}
+
 .skip-intro:hover,
 .skip-intro:focus-visible {
-  opacity: 1;
   text-decoration-color: var(--chalk);
 }
 
@@ -969,6 +1014,11 @@ input {
   letter-spacing: 0.02em;
 }
 
+.ruler-notice:empty {
+  padding: 0;
+  background: none;
+}
+
 .ruler-stats {
   display: flex;
   flex-wrap: wrap;
@@ -1005,6 +1055,18 @@ input {
   margin-left: auto;
   color: var(--chalk);
   font-size: 12.5px;
+}
+
+.ruler-reload {
+  min-height: 28px;
+  margin: -6px -4px -6px 4px;
+  padding: 0 4px;
+  font-size: 12.5px;
+  text-underline-offset: 4px;
+}
+
+.settings-toggle {
+  display: none;
 }
 
 .ledger {
@@ -1049,6 +1111,31 @@ input {
 
 .ledger-close {
   flex: none;
+}
+
+.ledger-more {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 10px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--mat-rule);
+  border-radius: 0;
+  background: rgb(247 245 239 / 0.08);
+  color: var(--chalk);
+  font: 600 13px/1.4 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-more:hover {
+  background: rgb(247 245 239 / 0.14);
+}
+
+.ledger-more:focus-visible {
+  outline-offset: -3px;
 }
 
 .ledger-scroll {
@@ -1170,14 +1257,31 @@ input {
 }
 
 .ledger-credit {
-  display: block;
+  display: -webkit-box;
   grid-column: 2;
   margin: 3px 0 0;
   overflow: hidden;
   color: var(--chalk-soft);
   font-size: 11.5px;
-  text-overflow: ellipsis;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.credit-license {
   white-space: nowrap;
+}
+
+.ledger-error {
+  display: block;
+  grid-column: 2;
+  margin: 3px 0 0;
+  color: var(--chalk);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: auto-phrase;
 }
 
 .ledger-place {
@@ -1247,6 +1351,7 @@ input {
 }
 
 .loupe[data-state="pinned"] {
+  z-index: 8;
   width: 316px;
   pointer-events: auto;
 }
@@ -1408,13 +1513,34 @@ input {
   font-weight: 500;
 }
 
+.slip-reason {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: auto-phrase;
+}
+
 .slip-credit {
+  display: -webkit-box;
   margin: 6px 0 0;
   overflow: hidden;
   color: var(--ink-soft);
   font-size: 11.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.loupe[data-state="pinned"] .slip-credit {
+  display: block;
+  max-height: 9em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+  scrollbar-width: thin;
 }
 
 .slip-extras {
@@ -1822,10 +1948,20 @@ input {
 
   .stage {
     align-self: stretch;
-    justify-content: space-between;
-    gap: 12px;
     max-width: none;
     padding: 4px var(--gutter) 12px;
+  }
+
+  .stage-scroll {
+    flex: 1 1 auto;
+    align-self: stretch;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .overlay[data-lede-folded] .lede {
+    display: none;
   }
 
   .intro {
@@ -1858,8 +1994,36 @@ input {
     gap: 4px;
   }
 
+  .action-add {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+  }
+
   .paper-button {
     width: 100%;
+  }
+
+  .action-add .paper-button {
+    flex: 1 1 12em;
+    width: auto;
+  }
+
+  .settings-toggle {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    margin-right: -12px;
+  }
+
+  .settings-toggle[aria-expanded="true"] {
+    text-decoration-color: var(--chalk);
+  }
+
+  .actions:not([data-settings-open]) > .check,
+  .actions:not([data-settings-open]) > .model-picker {
+    display: none;
   }
 
   .model-picker {
@@ -1925,11 +2089,13 @@ input {
   }
 
 
-  .overlay:not([data-status="loading-model"]) .stat-state {
+  .overlay:not([data-status="loading-model"]):not([data-status="model-failed"])
+    .stat-state {
     display: none;
   }
 
-  .overlay[data-status="loading-model"] .stat[data-key="rate"] {
+  .overlay[data-status="loading-model"] .stat[data-key="rate"],
+  .overlay[data-status="model-failed"] .stat[data-key="rate"] {
     display: none;
   }
 
@@ -1944,12 +2110,17 @@ input {
     text-wrap: balance;
   }
 
+  .ruler-notice:empty {
+    margin: 0;
+  }
+
   .ledger {
     top: calc(var(--mast-h) + 4px);
     right: 8px;
     left: 8px;
     bottom: calc(var(--ruler-h) + 8px);
     width: auto;
+    background: var(--mat-deep);
   }
 
   .ledger-table thead th:first-child {

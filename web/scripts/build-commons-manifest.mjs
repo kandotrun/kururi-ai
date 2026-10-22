@@ -27,7 +27,7 @@ const BATCH_SIZE = 50;
 const MAX_DEPTH = 6;
 const STREAM_WIDTH = 330;
 const LARGE_WIDTH = 960;
-const AUTHOR_LIMIT = 80;
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 const COORDINATE_SCALE = 100;
 const NEARBY_RADIUS_M = 10_000;
 const NEARBY_LIMIT = 20;
@@ -608,25 +608,56 @@ function decodeEntities(text) {
   });
 }
 
+function userLinks(html) {
+  const links = [];
+  for (const [, href] of html.matchAll(/\bhref="([^"]*)"/gi)) {
+    const match = /(?:\/wiki\/|[?&]title=)User(_talk)?:([^&#?/]+)/i.exec(decodeEntities(href));
+    if (!match) {
+      continue;
+    }
+    let name = match[2];
+    try {
+      name = decodeURIComponent(name);
+    } catch {}
+    links.push({ talk: match[1] !== undefined, name: name.replace(/_/g, " ").trim() });
+  }
+  return links.filter((link) => link.name !== "");
+}
+
 function plainAuthor(html) {
   const text = decodeEntities(
     html
+      .replace(/<a\b[^>]*\bhref="mailto:[^"]*"[^>]*>[\s\S]*?<\/a>/gi, " ")
       .replace(/<br\s*\/?>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<[^>]*>/g, " "),
   )
+    .replace(EMAIL, " ")
     .replace(/\s+/g, " ")
-    .replace(/\s*\((talk|discussion|contribs|disk)\b[^)]*\)/gi, "")
+    .replace(/\s*\(\s*(talk|discussion|contribs|disk)\b[^)]*\)/gi, " ")
     .replace(/\bUser:/g, "")
+    .replace(/\s*\(\s*\)/g, " ")
+    .replace(/\s+/g, " ")
     .replace(/\s+([,.;:)])/g, "$1")
     .replace(/\(\s+/g, "(")
-    .trim();
-  if ([...text].length <= AUTHOR_LIMIT) {
+    .trim()
+    .replace(/([.!?])\s+(or|and)$/i, "$1");
+  const links = userLinks(html);
+  const folded = text.toLowerCase();
+  if (
+    links.length === 0 ||
+    links.some((link) => !link.talk || folded.includes(link.name.toLowerCase()))
+  ) {
     return text;
   }
-  const head = [...text].slice(0, AUTHOR_LIMIT - 1).join("");
-  const space = head.lastIndexOf(" ");
-  return `${(space > AUTHOR_LIMIT / 2 ? head.slice(0, space) : head).replace(/[\s,;:(-]+$/, "")}…`;
+  return text === "" ? links[0].name : `${links[0].name}: ${text}`;
+}
+
+function assertCredits(authors) {
+  const broken = authors.filter((author) => author === "" || author.endsWith("…") || author.includes("@"));
+  if (broken.length > 0) {
+    throw new Error(`author credits need review: ${broken.map((author) => JSON.stringify(author)).join(", ")}`);
+  }
 }
 
 function canonicalLicenseUrl(raw) {
@@ -1289,6 +1320,7 @@ async function build() {
   const epoch = Number(process.env.SOURCE_DATE_EPOCH);
   const generatedAt = new Date(Number.isFinite(epoch) && epoch > 0 ? epoch * 1000 : Date.now()).toISOString().slice(0, 10) + "T00:00:00.000Z";
   const raw = buildRaw(selected, generatedAt);
+  assertCredits(raw.authors);
   const text = serialize(raw);
   const manifest = decodeManifest(JSON.parse(text));
   await mkdir(options.out, { recursive: true });

@@ -4,7 +4,13 @@ import {
   type AssetCache,
   type StorageEstimateLike,
 } from "./cache";
-import { downloadAssets, sha256Hex, FullModelError } from "./download";
+import {
+  downloadAssets,
+  FullModelError,
+  prefetchAssets,
+  sha256Hex,
+  type DownloadDeps,
+} from "./download";
 import { createFullEngine, type FullEngine } from "./engine";
 import { generalAssets, modelAssets } from "./ensemble-manifest";
 import { folderUrl, loadEnsembleManifest } from "./manifest-source";
@@ -72,21 +78,18 @@ export async function createBrowserEngine(
   if (!loaded.fromCache) {
     await remember(cache, manifestUrl, loaded.text);
   }
+  const downloads: DownloadDeps = {
+    fetcher: (url, init) => fetch(url, init),
+    cache,
+    digest: sha256Hex,
+  };
   return createFullEngine({
     manifest,
     async loadAssets(assets, onProgress) {
-      const result = await downloadAssets(
-        assets,
-        baseUrl,
-        {
-          fetcher: (url, init) => fetch(url, init),
-          cache,
-          digest: sha256Hex,
-        },
-        onProgress,
-      );
+      const result = await downloadAssets(assets, baseUrl, downloads, onProgress);
       return result.files;
     },
+    prefetchAssets: (assets) => prefetchAssets(assets, baseUrl, downloads),
     createRunner: createOrtRunner,
     onFallbackError(error) {
       console.warn(error);

@@ -9,11 +9,40 @@ import {
   type TextureDataType,
   UnsignedByteType,
   Vector2,
+  Vector4,
   WebGLRenderTarget,
   type WebGLRenderer,
 } from "three";
 import { FULLSCREEN_VERTEX, NOISE_GLSL, TONE_GLSL } from "./glsl";
 import { fullscreenTriangle } from "./stage-util";
+
+const PORTAL_GLSL = `
+uniform float uPortal;
+uniform vec4 uPortalA;
+uniform vec4 uPortalB;
+uniform vec2 uPortalSize;
+
+float portalEdge(vec2 p, vec2 a, vec2 b) {
+  vec2 d = (b - a) * uPortalSize;
+  vec2 inward = normalize(vec2(-d.y, d.x) + 1e-6);
+  return dot((p - a) * uPortalSize, inward);
+}
+
+float portalMask(vec2 uv) {
+  if (uPortal <= 0.0) {
+    return 0.0;
+  }
+  float inside = min(
+    min(portalEdge(uv, uPortalA.xy, uPortalA.zw), portalEdge(uv, uPortalA.zw, uPortalB.xy)),
+    min(portalEdge(uv, uPortalB.xy, uPortalB.zw), portalEdge(uv, uPortalB.zw, uPortalA.xy))
+  );
+  return uPortal * smoothstep(-0.75, 0.75, inside);
+}
+
+float weightB(vec2 uv, float base) {
+  return min(1.0, base + portalMask(uv));
+}
+`;
 
 const DOWN_FRAGMENT = `
 uniform sampler2D uSource;
@@ -26,10 +55,13 @@ uniform float uThreshold;
 uniform float uKnee;
 varying vec2 vUv;
 
+${PORTAL_GLSL}
+
 vec3 fetchColor(vec2 uv) {
   vec3 color = texture(uSource, uv).rgb * uWeightA;
-  if (uWeightB > 0.0) {
-    color += texture(uSourceB, uv).rgb * uWeightB;
+  float b = weightB(uv, uWeightB);
+  if (b > 0.0) {
+    color += texture(uSourceB, uv).rgb * b;
   }
   return color;
 }
@@ -93,6 +125,7 @@ const COMPOSITE_FRAGMENT = `
 uniform sampler2D uA;
 uniform sampler2D uB;
 uniform sampler2D uBloom;
+uniform sampler2D uHaze;
 uniform float uWeightA;
 uniform float uWeightB;
 uniform float uBloomStrength;
@@ -109,10 +142,19 @@ varying vec2 vUv;
 
 ${NOISE_GLSL}
 ${TONE_GLSL}
+${PORTAL_GLSL}
 
-vec4 flyClouds(vec2 uv) {
+vec3 cloudFog(vec2 uv, vec2 centred) {
+  float below = smoothstep(0.95, 0.05, uv.y);
+  float drift = fbm(centred * 1.7 + vec2(uCloudTime * 0.11, -uCloudTime * 0.07));
+  vec3 fog = mix(vec3(0.040, 0.054, 0.061), vec3(0.074, 0.064, 0.052), below * 0.75);
+  return fog * (0.78 + 0.44 * drift);
+}
+
+vec4 flyClouds(vec2 uv, vec3 glow) {
   float aspect = uResolution.x / max(uResolution.y, 1.0);
   vec2 centred = (uv - vec2(0.5, 0.46)) * vec2(aspect, 1.0);
+  float below = smoothstep(0.95, 0.05, uv.y);
   vec3 color = vec3(0.0);
   float alpha = 0.0;
   for (int i = 0; i < 5; i++) {
@@ -121,21 +163,21 @@ vec4 flyClouds(vec2 uv) {
     float scale = mix(3.4, 0.22, z * z);
     vec2 q = centred * scale + vec2(layer * 3.7, layer * 1.9);
     float n = fbm(q * 1.5 + vec2(layer * 0.7, uCloudTime * 0.05));
-    float shape = smoothstep(0.4, 0.64, n);
-    float life = smoothstep(0.0, 0.3, z) * (1.0 - smoothstep(0.82, 1.0, z));
-    float a = shape * life * 0.92;
-    float thickness = smoothstep(0.48, 0.86, n);
-    vec3 cool = vec3(0.028, 0.037, 0.046);
-    vec3 warm = vec3(0.11, 0.092, 0.078) * (0.35 + 0.65 * (1.0 - uv.y));
-    vec3 tint = mix(warm, cool, thickness) * (0.8 + 0.4 * z);
+    float shape = smoothstep(0.36, 0.74, n);
+    float life = smoothstep(0.0, 0.3, z) * (1.0 - smoothstep(0.8, 1.0, z));
+    float a = shape * life * 0.86;
+    float thickness = smoothstep(0.46, 0.84, n);
+    vec3 thin = vec3(0.052, 0.072, 0.082);
+    vec3 thick = vec3(0.092, 0.084, 0.074) * (0.6 + 0.4 * below);
+    vec3 tint = mix(thin, thick, thickness) * (0.82 + 0.3 * z) + glow * (0.25 + 0.55 * thickness);
     color += tint * a * (1.0 - alpha);
     alpha += a * (1.0 - alpha);
   }
-  vec3 fill = mix(vec3(0.075, 0.064, 0.056), vec3(0.026, 0.034, 0.04), smoothstep(0.0, 0.9, uv.y));
-  float cover = smoothstep(0.86, 0.985, uClouds);
-  vec3 resolved = alpha > 1e-3 ? color / alpha : fill;
-  vec3 mixed = mix(fill, resolved, alpha);
-  return vec4(mixed, max(alpha * uClouds, cover));
+  vec3 fog = cloudFog(uv, centred) + glow * 0.35;
+  float cover = smoothstep(0.55, 0.92, uClouds);
+  vec3 resolved = alpha > 1e-3 ? color / alpha : fog;
+  vec3 mixed = mix(fog, resolved, alpha);
+  return vec4(mixed, max(alpha * uClouds, cover * (0.9 + 0.1 * alpha)));
 }
 
 float vignette(vec2 fragCoord) {
@@ -147,20 +189,27 @@ float vignette(vec2 fragCoord) {
 
 void main() {
   vec3 color = texture(uA, vUv).rgb * uWeightA;
-  if (uWeightB > 0.0) {
-    color += texture(uB, vUv).rgb * uWeightB;
+  float b = weightB(vUv, uWeightB);
+  if (b > 0.0) {
+    color += texture(uB, vUv).rgb * b;
   }
-  color += texture(uBloom, vUv).rgb * uBloomStrength;
+  vec3 bloom = texture(uBloom, vUv).rgb;
+  color += bloom * uBloomStrength;
   if (uClouds > 0.001) {
-    vec4 clouds = flyClouds(vUv);
+    vec3 glow = min(texture(uHaze, vUv).rgb * 0.7, vec3(0.5));
+    vec4 clouds = flyClouds(vUv, glow);
+    float aspect = uResolution.x / max(uResolution.y, 1.0);
+    vec3 haze = cloudFog(vUv, (vUv - vec2(0.5, 0.46)) * vec2(aspect, 1.0)) + glow * 0.8;
+    color = mix(color, haze, 0.4 * smoothstep(0.0, 0.7, uClouds));
     color = mix(color, clouds.rgb, clouds.a);
   }
   if (uGlow > 0.001) {
     float aspect = uResolution.x / max(uResolution.y, 1.0);
     float r = length((vUv - 0.5) * vec2(aspect, 1.0));
-    float centre = 1.0 - smoothstep(0.0, 0.85, r);
-    vec3 warm = mix(vec3(0.36, 0.22, 0.12), vec3(0.9, 0.64, 0.38), centre);
-    color = mix(color, warm, uGlow * (0.86 + 0.14 * centre));
+    float centre = 1.0 - smoothstep(0.0, 0.9, r);
+    vec3 warm = vec3(1.0, 0.74, 0.48);
+    color *= 1.0 + uGlow * (0.5 + 0.9 * centre) * warm;
+    color += warm * uGlow * 0.035 * centre;
   }
   color *= uExposure * uIntro;
   color *= vignette(gl_FragCoord.xy);
@@ -186,6 +235,8 @@ export interface CompositeParams {
   bloomStrength: number;
   bloomThreshold: number;
   time: number;
+  portal: number;
+  portalQuad: number[];
 }
 
 export function createCompositeParams(): CompositeParams {
@@ -202,6 +253,8 @@ export function createCompositeParams(): CompositeParams {
     bloomStrength: 0.6,
     bloomThreshold: 0.9,
     time: 0,
+    portal: 0,
+    portalQuad: [0, 0, 1, 0, 1, 1, 0, 1],
   };
 }
 
@@ -227,6 +280,12 @@ export class PostPipeline {
   private readonly up: ShaderMaterial;
   private readonly composite: ShaderMaterial;
   private readonly levels: Level[] = [];
+  private readonly portalUniforms = {
+    uPortal: { value: 0 },
+    uPortalA: { value: new Vector4() },
+    uPortalB: { value: new Vector4() },
+    uPortalSize: { value: new Vector2(1, 1) },
+  };
   private width = 1;
   private height = 1;
 
@@ -268,6 +327,7 @@ export class PostPipeline {
         uPrefilter: { value: 0 },
         uThreshold: { value: 0.9 },
         uKnee: { value: 0.5 },
+        ...this.portalUniforms,
       },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: DOWN_FRAGMENT,
@@ -290,6 +350,7 @@ export class PostPipeline {
         uA: { value: this.targetA.texture },
         uB: { value: this.targetB.texture },
         uBloom: { value: null },
+        uHaze: { value: null },
         uWeightA: { value: 1 },
         uWeightB: { value: 0 },
         uBloomStrength: { value: 0.6 },
@@ -302,6 +363,7 @@ export class PostPipeline {
         uVignette: { value: 0.34 },
         uTime: { value: 0 },
         uResolution: { value: new Vector2(1, 1) },
+        ...this.portalUniforms,
       },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: COMPOSITE_FRAGMENT,
@@ -332,6 +394,7 @@ export class PostPipeline {
       level.up?.setSize(lw, lh);
     }
     this.composite.uniforms.uResolution!.value.set(w, h);
+    this.portalUniforms.uPortalSize.value.set(w, h);
   }
 
   materials(): ShaderMaterial[] {
@@ -348,9 +411,15 @@ export class PostPipeline {
 
   render(params: CompositeParams): void {
     const renderer = this.renderer;
+    const portal = this.portalUniforms;
+    const quad = params.portalQuad;
+    portal.uPortal.value = params.portal;
+    portal.uPortalA.value.set(quad[0]!, quad[1]!, quad[2]!, quad[3]!);
+    portal.uPortalB.value.set(quad[4]!, quad[5]!, quad[6]!, quad[7]!);
     const bloom = this.bloom(params);
     const uniforms = this.composite.uniforms;
     uniforms.uBloom!.value = bloom;
+    uniforms.uHaze!.value = bloom ? this.hazeTexture() : null;
     uniforms.uWeightA!.value = params.weightA;
     uniforms.uWeightB!.value = params.weightB;
     uniforms.uBloomStrength!.value = bloom ? params.bloomStrength : 0;
@@ -378,6 +447,12 @@ export class PostPipeline {
     this.up.dispose();
     this.composite.dispose();
     this.quad.geometry.dispose();
+  }
+
+  private hazeTexture(): Texture {
+    const index = Math.max(0, Math.min(2, this.levels.length - 2));
+    const level = this.levels[index]!;
+    return (level.up ?? level.down).texture;
   }
 
   private pass(material: ShaderMaterial, target: WebGLRenderTarget): void {

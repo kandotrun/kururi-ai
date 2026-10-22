@@ -1,13 +1,22 @@
-import type { VisitorImages } from "./visitor-images";
+import type { VisitorImageLease, VisitorImages } from "./visitor-images";
 import type { PhotoRecord } from "../contracts";
 import { finalQuarter } from "../core/rotation";
-import { creditText, judgementText, photoPlace, verdictOf } from "./copy";
+import {
+  failureReason,
+  judgementText,
+  newRowsText,
+  photoPlace,
+  verdictOf,
+} from "./copy";
+import { renderCredit } from "./credit";
 import type { DecisionLog } from "./decision-log";
 import { externalLink, h, setText } from "./dom";
 import { formatCount } from "./format";
 import { renderVerdict } from "./verdict";
 
 const RENDER_DELAY_MS = 250;
+const HOLD_SCROLL_PX = 24;
+const THUMB_MARGIN = "240px 0px";
 
 export interface LedgerOptions {
   records: ReadonlyMap<string, PhotoRecord>;
@@ -27,6 +36,13 @@ export interface LedgerView {
   dispose(): void;
 }
 
+interface VisitorThumb {
+  readonly frame: HTMLElement;
+  readonly image: HTMLImageElement;
+  readonly file: File;
+  lease: VisitorImageLease | null;
+}
+
 function columnHeader(text: string): HTMLTableCellElement {
   return h("th", { scope: "col" }, [text]);
 }
@@ -44,6 +60,11 @@ export function createLedger(options: LedgerOptions): LedgerView {
     { type: "button", class: "text-button ledger-close" },
     ["閉じる"],
   );
+  const moreButton = h("button", {
+    type: "button",
+    class: "ledger-more",
+    hidden: true,
+  });
   const tbody = h("tbody");
   const table = h("table", { class: "ledger-table" }, [
     h("caption", { class: "sr-only" }, ["判定した写真（新しい順）"]),
@@ -82,6 +103,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
         h("div", {}, [heading, summary]),
         closeButton,
       ]),
+      moreButton,
       scroller,
     ],
   );
@@ -89,8 +111,90 @@ export function createLedger(options: LedgerOptions): LedgerView {
   let open = false;
   let renderedSize = 0;
   let timer = 0;
+  const thumbs = new Map<HTMLTableRowElement, VisitorThumb>();
+  const frames = new Map<Element, HTMLTableRowElement>();
+
+  const watcher =
+    typeof IntersectionObserver === "function"
+      ? new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                showThumb(entry.target);
+              }
+            }
+          },
+          { root: scroller, rootMargin: THUMB_MARGIN },
+        )
+      : null;
+
+  function showThumb(frame: Element): void {
+    watcher?.unobserve(frame);
+    const line = frames.get(frame);
+    const thumb = line ? thumbs.get(line) : undefined;
+    if (!thumb || thumb.lease) {
+      return;
+    }
+    const lease = options.images.acquire(thumb.file);
+    thumb.lease = lease;
+    lease.url.then(
+      (url) => {
+        if (thumb.lease === lease) {
+          thumb.image.src = url;
+        }
+      },
+      () => {
+        if (thumb.lease === lease) {
+          thumb.frame.dataset.failed = "true";
+        }
+      },
+    );
+  }
+
+  function forgetThumb(line: HTMLTableRowElement): void {
+    const thumb = thumbs.get(line);
+    if (!thumb) {
+      return;
+    }
+    watcher?.unobserve(thumb.frame);
+    frames.delete(thumb.frame);
+    thumbs.delete(line);
+    thumb.lease?.release();
+    thumb.lease = null;
+  }
+
+  function holding(): boolean {
+    const active = document.activeElement;
+    return (
+      (active instanceof Node && tbody.contains(active)) ||
+      scroller.scrollTop > HOLD_SCROLL_PX
+    );
+  }
+
+  function schedule(): void {
+    if (open && timer === 0) {
+      timer = window.setTimeout(render, RENDER_DELAY_MS);
+    }
+  }
 
   closeButton.addEventListener("click", () => options.onClose());
+  moreButton.addEventListener("click", () => {
+    window.clearTimeout(timer);
+    render(true);
+    scroller.scrollTop = 0;
+    const first = tbody.querySelector<HTMLElement>(".ledger-photo");
+    (first ?? heading).focus({ preventScroll: true });
+  });
+  tbody.addEventListener("focusout", schedule);
+  scroller.addEventListener(
+    "scroll",
+    () => {
+      if (scroller.scrollTop <= HOLD_SCROLL_PX && !moreButton.hidden) {
+        schedule();
+      }
+    },
+    { passive: true },
+  );
   tbody.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) {
@@ -103,7 +207,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
     }
   });
 
-  function thumbnail(record: PhotoRecord): Node {
+  function thumbnail(record: PhotoRecord, line: HTMLTableRowElement): Node {
     const { source } = record;
     const url = source.thumbUrl ?? source.largeUrl;
     const frame = h("span", { class: "ledger-thumb", "aria-hidden": "true" });
@@ -116,14 +220,8 @@ export function createLedger(options: LedgerOptions): LedgerView {
       if (url) {
         image.src = url;
       } else if (source.file) {
-        options.images.url(source.file).then(
-          (visitorUrl) => {
-            image.src = visitorUrl;
-          },
-          () => {
-            frame.dataset.failed = "true";
-          },
-        );
+        thumbs.set(line, { frame, image, file: source.file, lease: null });
+        frames.set(frame, line);
       }
       const quarter = record.prediction
         ? finalQuarter(record.simulated, record.prediction.correction)
@@ -134,12 +232,17 @@ export function createLedger(options: LedgerOptions): LedgerView {
     return frame;
   }
 
-  function credit(record: PhotoRecord): Node {
-    const { source } = record;
-    const text = creditText(source);
-    return source.kind === "commons" && source.attribution
-      ? externalLink(source.attribution.pageUrl, text)
-      : document.createTextNode(text);
+  function credit(record: PhotoRecord): HTMLElement {
+    const line = h("span", { class: "ledger-credit" });
+    renderCredit(line, record.source, true);
+    return line;
+  }
+
+  function failure(record: PhotoRecord): Node | null {
+    const reason = failureReason(record);
+    return reason === null
+      ? null
+      : h("span", { class: "ledger-error" }, [reason]);
   }
 
   function place(record: PhotoRecord): Node | null {
@@ -157,7 +260,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
     line.append(
       h("th", { scope: "row" }, [
         h("div", { class: "ledger-item" }, [
-          thumbnail(record),
+          thumbnail(record, line),
           h(
             "button",
             { type: "button", class: "ledger-photo", "data-id": record.id },
@@ -167,7 +270,8 @@ export function createLedger(options: LedgerOptions): LedgerView {
               ]),
             ],
           ),
-          h("span", { class: "ledger-credit" }, [credit(record)]),
+          credit(record),
+          failure(record),
           place(record),
         ]),
       ]),
@@ -177,9 +281,27 @@ export function createLedger(options: LedgerOptions): LedgerView {
     return line;
   }
 
+  function watchThumbs(): void {
+    for (const thumb of thumbs.values()) {
+      if (thumb.lease) {
+        continue;
+      }
+      if (watcher) {
+        watcher.observe(thumb.frame);
+      } else {
+        showThumb(thumb.frame);
+      }
+    }
+  }
+
   function clearRows(): void {
+    watcher?.disconnect();
+    for (const line of Array.from(thumbs.keys())) {
+      forgetThumb(line);
+    }
     tbody.replaceChildren();
     renderedSize = 0;
+    moreButton.hidden = true;
   }
 
   function updateSummary(): void {
@@ -194,11 +316,19 @@ export function createLedger(options: LedgerOptions): LedgerView {
     table.hidden = count === 0;
   }
 
-  function render(): void {
+  function render(force = false): void {
     timer = 0;
     if (!open) {
       return;
     }
+    const waiting = log.size - renderedSize;
+    if (waiting > 0 && renderedSize > 0 && !force && holding()) {
+      setText(moreButton, newRowsText(waiting));
+      moreButton.hidden = false;
+      updateSummary();
+      return;
+    }
+    moreButton.hidden = true;
     const fresh = log.since(renderedSize, limit);
     renderedSize = log.size;
     if (fresh.length > 0) {
@@ -215,8 +345,10 @@ export function createLedger(options: LedgerOptions): LedgerView {
         if (!last) {
           break;
         }
+        forgetThumb(last);
         last.remove();
       }
+      watchThumbs();
     }
     updateSummary();
   }
@@ -247,11 +379,7 @@ export function createLedger(options: LedgerOptions): LedgerView {
       timer = 0;
       clearRows();
     },
-    notify() {
-      if (open && timer === 0) {
-        timer = window.setTimeout(render, RENDER_DELAY_MS);
-      }
-    },
+    notify: schedule,
     dispose() {
       window.clearTimeout(timer);
       clearRows();

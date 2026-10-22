@@ -29,6 +29,9 @@ export interface FullEngineDeps {
     assets: readonly EnsembleAsset[],
     onProgress: ProgressReport | null,
   ): Promise<Map<string, AssetBytes>>;
+  prefetchAssets?(
+    assets: readonly EnsembleAsset[],
+  ): Promise<Map<string, AssetBytes> | null>;
   createRunner(
     model: EnsembleModel,
     files: ReadonlyMap<string, AssetBytes>,
@@ -75,7 +78,7 @@ export function createFullEngine(deps: FullEngineDeps): FullEngine {
   const { manifest } = deps;
   let general: LoadedModel[] | null = null;
   let fallback: Promise<LoadedModel> | null = null;
-  let fallbackFiles: Promise<Map<string, AssetBytes>> | null = null;
+  let prefetched: Promise<Map<string, AssetBytes> | null> | null = null;
   const owned: LoadedModel[] = [];
   let disposed = false;
   let queue: Promise<unknown> = Promise.resolve();
@@ -107,17 +110,20 @@ export function createFullEngine(deps: FullEngineDeps): FullEngine {
     return loaded;
   }
 
-  function fallbackAssets(model: EnsembleModel): Promise<Map<string, AssetBytes>> {
-    if (fallbackFiles === null) {
-      const pending = deps.loadAssets(modelAssets(model), null);
-      pending.catch(() => {
-        if (fallbackFiles === pending) {
-          fallbackFiles = null;
-        }
-      });
-      fallbackFiles = pending;
-    }
-    return fallbackFiles;
+  async function fallbackAssets(
+    model: EnsembleModel,
+  ): Promise<Map<string, AssetBytes>> {
+    const held = prefetched;
+    prefetched = null;
+    const files = held ? await held.catch(() => null) : null;
+    return files ?? deps.loadAssets(modelAssets(model), null);
+  }
+
+  function prefetch(model: EnsembleModel): Promise<Map<string, AssetBytes> | null> {
+    const assets = modelAssets(model);
+    return deps.prefetchAssets
+      ? deps.prefetchAssets(assets)
+      : deps.loadAssets(assets, null);
   }
 
   async function fallbackModel(): Promise<LoadedModel | null> {
@@ -188,12 +194,20 @@ export function createFullEngine(deps: FullEngineDeps): FullEngine {
       }
     },
     prefetchFallback() {
-      if (general === null || disposed || manifest.fallback === null) {
+      if (
+        general === null ||
+        disposed ||
+        manifest.fallback === null ||
+        prefetched !== null ||
+        fallback !== null
+      ) {
         return;
       }
-      fallbackAssets(manifest.fallback).catch((error: unknown) => {
+      const pending = prefetch(manifest.fallback);
+      pending.catch((error: unknown) => {
         deps.onFallbackError?.(error);
       });
+      prefetched = pending;
     },
     process(image) {
       const task = queue.then(() => run(image));
@@ -204,7 +218,8 @@ export function createFullEngine(deps: FullEngineDeps): FullEngine {
       disposed = true;
       await queue;
       await fallback?.catch(() => null);
-      await fallbackFiles?.catch(() => null);
+      await prefetched?.catch(() => null);
+      prefetched = null;
       await releaseAll(owned.splice(0));
       general = null;
     },

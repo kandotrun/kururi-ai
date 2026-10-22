@@ -18,6 +18,7 @@ export interface AppConfig {
   workers: number | null;
   model: ModelId;
   intro: boolean;
+  forceReducedMotion: boolean;
 }
 
 const MAX_WORKERS = 8;
@@ -37,8 +38,8 @@ export function readAppConfig(search: string, hints: DeviceHints): AppConfig {
   const phone = hints.coarsePointer && hints.shortestScreenSide < 820;
   const smallMemory =
     hints.deviceMemory !== undefined && hints.deviceMemory <= 4;
-  const reducedMotion =
-    hints.prefersReducedMotion || params.get("motion") === "reduce";
+  const forceReducedMotion = params.get("motion") === "reduce";
+  const reducedMotion = hints.prefersReducedMotion || forceReducedMotion;
   return {
     seed,
     limit: positiveInteger(params.get("limit")),
@@ -48,5 +49,6 @@ export function readAppConfig(search: string, hints: DeviceHints): AppConfig {
     workers: workers === null ? null : Math.min(workers, MAX_WORKERS),
     model: params.get("model") === "full" ? "full" : "nano",
     intro: !reducedMotion && params.get("intro") !== "off",
+    forceReducedMotion,
   };
 }

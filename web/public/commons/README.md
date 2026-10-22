@@ -1,6 +1,6 @@
 # Wikimedia Commons photo set
 
-The web demo sorts roughly 3,000 Wikimedia Commons
+The web demo sorts 2,809 Wikimedia Commons
 [featured pictures](https://commons.wikimedia.org/wiki/Commons:Featured_pictures).
 This folder holds only metadata; no photo is stored in the repository.
 Thumbnails are loaded at runtime from `upload.wikimedia.org`.
@@ -28,10 +28,11 @@ Options:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--target <n>` | `3000` | Number of files to keep. |
+| `--target <n>` | `3000` | Number of files to select before the reviewed exclusions are removed. |
 | `--minimum <n>` | `2000` | Fail instead of writing when fewer files pass the filters. |
 | `--out <dir>` | `public/commons` | Output folder for `manifest.json` and `credits.html`. |
 | `--cache <dir>` | none | Store raw API responses on disk and reuse them on the next run. Useful while tuning filters. |
+| `--exclude <file>` | `scripts/commons-exclude.json` | Reviewed list of files removed after balancing (see [Selection rules](#selection-rules), step 4). |
 | `--explore` | off | Crawl the category tree, print it with per-category file counts, and stop. |
 | `--check <n>` | off | Do not build. Pick `n` random entries from the existing manifest and verify that both runtime thumbnail URLs (330 px and 960 px) answer `200`, `image/jpeg` and `access-control-allow-origin: *`, and that the 330 px JPEG has the expected aspect ratio. |
 
@@ -93,9 +94,15 @@ about 1,500 for the locations (see [Locations](#locations)) and takes 15 to 25 m
    - Landscape: width ≥ 1200 and height ≥ 800. Portrait: height ≥ 1200 and width ≥ 1000
      (so the 960 px thumbnail is a real downscale).
    - Aspect ratio width / height within [0.5, 2.0] (drops panoramas).
-   - `extmetadata.Artist` is present. The author is the Artist HTML reduced to plain
-     text, entities decoded, `(talk)`-style links removed, whitespace collapsed and
-     capped at 80 characters (cut at a word boundary with `…`).
+   - `extmetadata.Artist` is present. The author is the whole Artist HTML reduced to
+     plain text: entities decoded, `(talk)`-style links, `mailto:` links and e-mail
+     addresses removed, whitespace collapsed. It is never shortened, because CC BY
+     and CC BY-SA credits include what the author asked for (co-attribution,
+     derivative-work and retouching credits, the name to use). When the text names
+     nobody and the HTML links only a `User talk:` page, that user name is put in
+     front (`Böhringer: Feel free to use my photos…`). The build stops if an author
+     ends in `…` or still contains `@`. Only the demo's UI shortens long credits on
+     screen; `credits.html` always shows them whole.
    - `extmetadata.LicenseShortName` is CC0, Public domain, CC BY or CC BY-SA (any
      version or port). GFDL-only, FAL and other licenses are dropped.
    - `extmetadata.Restrictions` does not contain `personality` (identifiable people).
@@ -124,7 +131,15 @@ about 1,500 for the locations (see [Locations](#locations)) and takes 15 to 25 m
    in batches of 50 until the topic has enough accepted files. The per-topic cap is the
    smallest value `c` with `Σ min(accepted_t, c) ≥ target` (water filling), so small
    topics keep everything and large topics are cut evenly. The last few surplus files
-   are removed from the largest topics so the total is exactly the target.
+   are removed from the largest topics so the balanced selection is exactly the target.
+4. **Review exclusions.** Every thumbnail of the balanced selection was looked at on
+   contact sheets (`reviewed` and `method` in `scripts/commons-exclude.json`, last on
+   2026-10-21). Files without a natural upright direction (163, for example top-down
+   textures, bark, specimen plates) or unsuitable for a family-friendly demo (28:
+   dead or injured animals, nudity, weapons, non-photos, an identifiable close-up and
+   other disturbing scenes) are listed there with a reason and a note, and are removed
+   after balancing. The shipped total is therefore the target minus the 191 reviewed
+   exclusions: 2,809 of 3,000.
 
 The build prints the rejection counts with up to 40 example titles per reason.
 Read them after changing a filter. The patterns were tuned by looking at contact
@@ -158,28 +173,28 @@ Coverage of the current manifest:
 
 | topic | photos | with coordinates | with country |
 |---|---:|---:|---:|
-| `birds` | 267 | 215 | 175 |
-| `mammals` | 267 | 156 | 128 |
-| `insects` | 266 | 197 | 190 |
-| `reptiles` | 266 | 177 | 144 |
-| `aquatic` | 266 | 44 | 43 |
-| `fungi` | 61 | 43 | 43 |
-| `food` | 135 | 77 | 77 |
-| `transport` | 266 | 193 | 184 |
-| `objects` | 203 | 126 | 123 |
-| `cityscapes` | 205 | 160 | 158 |
-| `architecture` | 266 | 184 | 182 |
-| `landscapes` | 266 | 206 | 197 |
-| `plants` | 266 | 181 | 180 |
-| total | 3,000 | 1,959 (65 %) | 1,824 (61 %) |
+| `birds` | 266 | 215 | 175 |
+| `mammals` | 261 | 154 | 127 |
+| `insects` | 255 | 196 | 189 |
+| `reptiles` | 257 | 172 | 140 |
+| `aquatic` | 211 | 38 | 37 |
+| `fungi` | 56 | 41 | 41 |
+| `food` | 118 | 69 | 69 |
+| `transport` | 260 | 190 | 181 |
+| `objects` | 179 | 116 | 113 |
+| `cityscapes` | 204 | 160 | 158 |
+| `architecture` | 254 | 181 | 179 |
+| `landscapes` | 256 | 197 | 188 |
+| `plants` | 232 | 163 | 162 |
+| total | 2,809 | 1,892 (67 %) | 1,759 (63 %) |
 
-Of the 1,959 coordinates, 1,855 are camera locations and 104 object locations. The
-country came from the coordinates themselves for 297 photos and from nearby articles for
-1,527; 135 stay without a country. Where both sources exist they agree for 279 of 283
+Of the 1,892 coordinates, 1,794 are camera locations and 98 object locations. The
+country came from the coordinates themselves for 283 photos and from nearby articles for
+1,476; 133 stay without a country. Where both sources exist they agree for 267 of 271
 photos (the four others are on borders or in overseas territories, and the coordinates'
-own code wins). The lookup took 60 GeoData requests and 1,419 geosearch requests, and the
-manifest grew from 255 KB to 295 KB (105 KB to 119 KB gzipped). Aquarium and underwater
-photos rarely carry coordinates, which is why `aquatic` is low.
+own code wins). The lookup takes 57 GeoData batches of 50 titles and 1,390 geosearch
+requests (one per distinct rounded point). The manifest is 280 KB (114 KB gzipped).
+Aquarium and underwater photos rarely carry coordinates, which is why `aquatic` is low.
 
 Retired ISO codes are mapped when the successor is unambiguous (`BU`, `DD`, `FX`, `TP`,
 `ZR`) and ignored when the country split (`AN`, `CS`, `NT`, `SU`, `YU`), so the nearby

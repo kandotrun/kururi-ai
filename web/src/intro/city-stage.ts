@@ -27,6 +27,8 @@ import {
   BUILDING_STRIDE,
   CORRIDOR,
   EXPRESSWAYS,
+  HERO_FRAME,
+  HERO_GLASS,
   HERO_WINDOW,
   STREETS,
   aviationBeacons,
@@ -105,6 +107,7 @@ export class CityStage {
   readonly camera = new PerspectiveCamera(32, 1, 1, 60000);
   readonly buildingCount: number;
   private readonly viewport = new Vector2(1, 1);
+  private readonly corner = new Vector3();
   private readonly geometries: BufferGeometry[] = [];
   private readonly materials: ShaderMaterial[] = [];
   private readonly common = {
@@ -187,8 +190,10 @@ export class CityStage {
         uWindowSize: {
           value: new Vector2(HERO_WINDOW.width, HERO_WINDOW.height),
         },
+        uWindowFrame: { value: HERO_FRAME },
         uHeroGlow: { value: 1.2 },
         uWindowGain: { value: 1.0 },
+        uPortal: { value: 0 },
       },
       vertexShader: BUILDING_VERTEX,
       fragmentShader: BUILDING_FRAGMENT,
@@ -371,12 +376,36 @@ export class CityStage {
     this.scene.add(this.sky, groundMesh, buildingMesh, streamMesh, glowMesh);
   }
 
+  portalQuad(out: number[]): void {
+    const halfWidth = HERO_GLASS.width / 2;
+    const halfHeight = HERO_GLASS.height / 2;
+    const corners: readonly (readonly [number, number])[] = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    this.camera.updateMatrixWorld();
+    corners.forEach(([sx, sy], index) => {
+      const point = this.corner
+        .set(
+          HERO_WINDOW.x + sx * halfWidth,
+          HERO_WINDOW.y + sy * halfHeight,
+          HERO_WINDOW.z,
+        )
+        .project(this.camera);
+      out[index * 2] = point.x * 0.5 + 0.5;
+      out[index * 2 + 1] = point.y * 0.5 + 0.5;
+    });
+  }
+
   update(
     time: number,
     pose: CameraPose,
     width: number,
     height: number,
     pixelRatio: number,
+    portal: number,
   ): void {
     applyPose(this.camera, pose, width / Math.max(1, height));
     this.sky.position.copy(this.camera.position);
@@ -387,7 +416,8 @@ export class CityStage {
     const streamGain = envelope(time, 5.95, 6.4, 7.6, 7.88);
     this.stream.uniforms.uGain!.value = 1.4 * streamGain;
     this.cards.uniforms.uTime!.value = time;
-    this.cards.uniforms.uFade!.value = streamGain;
+    this.cards.uniforms.uFade!.value =
+      streamGain * (1 - smoothstep(7.55, 7.75, time));
     this.cards.uniforms.uCardPixels!.value = 1.6 * pixelRatio;
     this.cards.uniforms.uCardMax!.value = 11 * pixelRatio;
     this.beacons.uniforms.uTime!.value = time;
@@ -399,6 +429,7 @@ export class CityStage {
     this.glow.uniforms.uSize!.value = 7 * pixelRatio;
     this.buildings.uniforms.uHeroGlow!.value =
       1.5 + 0.7 * smoothstep(7.2, 7.8, time);
+    this.buildings.uniforms.uPortal!.value = portal;
   }
 
   dispose(): void {

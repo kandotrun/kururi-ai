@@ -34,12 +34,108 @@ uniform float uLights;
 uniform float uSun;
 uniform vec4 uJapanBounds;
 uniform float uDetail;
+uniform vec2 uTargetLonLat;
 
 varying vec2 vUv;
 varying vec3 vPos;
 
 ${SUN_GLSL}
 ${NOISE_GLSL}
+
+vec3 bicubic(sampler2D tex, vec2 uv) {
+  vec2 size = vec2(textureSize(tex, 0));
+  vec2 p = uv * size - 0.5;
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 f2 = f * f;
+  vec2 f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 g0 = w0 + w1;
+  vec2 g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / size;
+  vec2 h1 = (i + 1.5 + w3 / g1) / size;
+  vec3 a = textureLod(tex, vec2(h0.x, h0.y), 0.0).rgb;
+  vec3 b = textureLod(tex, vec2(h1.x, h0.y), 0.0).rgb;
+  vec3 c = textureLod(tex, vec2(h0.x, h1.y), 0.0).rgb;
+  vec3 d = textureLod(tex, vec2(h1.x, h1.y), 0.0).rgb;
+  return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
+}
+
+float glint(float px) {
+  return exp(-px * px / 0.7);
+}
+
+float roadFamily(vec2 p, float spacing, float pitch, float run, float pixelKm, float occupancy, float seed) {
+  float spacingPx = spacing / pixelKm;
+  float pitchPx = pitch / pixelKm;
+  float rowF = p.y / spacing;
+  float row = floor(rowF + 0.5);
+  float lineRes = smoothstep(1.5, 4.0, spacingPx);
+  float dotRes = smoothstep(1.5, 4.0, pitchPx);
+  float segment = floor(p.x / (spacing * run) + hash12(vec2(row, seed)) * 7.0);
+  float on = step(hash12(vec2(row * 1.37 + seed, segment)), occupancy);
+  float across = glint((rowF - row) * spacingPx);
+  float along = glint((fract(p.x / pitch + hash12(vec2(row, seed + 5.0))) - 0.5) * pitchPx);
+  float pattern = mix(occupancy, on, lineRes) * mix(1.0, across, lineRes) * mix(1.0, along, dotRes);
+  float mean = occupancy * mix(1.0, 1.48 / spacingPx, lineRes) * mix(1.0, 1.48 / pitchPx, dotRes);
+  return pattern / max(mean, 1e-4);
+}
+
+float scatterLights(vec2 p, float cell, float pixelKm, float occupancy, float seed) {
+  float cellPx = cell / pixelKm;
+  float res = smoothstep(1.5, 4.0, cellPx);
+  vec2 g = p / cell + seed;
+  vec2 id = floor(g);
+  float on = step(hash12(id + seed * 3.1), occupancy);
+  vec2 jitter = vec2(hash12(id + 3.7), hash12(id + 11.3)) * 0.7 + 0.15;
+  vec2 offsetPx = (fract(g) - jitter) * cellPx;
+  float spot = exp(-dot(offsetPx, offsetPx) / 0.7);
+  float pattern = mix(occupancy, on * spot, res);
+  float mean = occupancy * mix(1.0, 2.2 / (cellPx * cellPx), res);
+  return pattern / max(mean, 1e-4);
+}
+
+vec3 urbanLights(vec2 km, float energy, float pixelKm) {
+  float occupancy = smoothstep(0.02, 0.9, energy);
+  vec2 base = floor(km / 8.0);
+  vec2 district = base;
+  vec2 centre = (base + 0.5) * 8.0;
+  float nearest = 1e9;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 id = base + vec2(float(i), float(j));
+      vec2 site = (id + 0.15 + 0.7 * vec2(hash12(id + 13.0), hash12(id + 29.0))) * 8.0;
+      vec2 delta = km - site;
+      float d = dot(delta, delta);
+      if (d < nearest) {
+        nearest = d;
+        district = id;
+        centre = site;
+      }
+    }
+  }
+  float angle = (hash12(district + 41.0) - 0.5) * 0.9;
+  float c = cos(angle);
+  float s = sin(angle);
+  vec2 q = km - centre;
+  vec2 p = vec2(c * q.x - s * q.y, s * q.x + c * q.y) + hash12(district + 7.0) * 3.0;
+  float park = smoothstep(0.3, 0.62, valueNoise(km / 1.9 + 9.0));
+  float local = occupancy * mix(0.25, 1.0, park);
+  float arterial = roadFamily(p, 1.35, 0.11, 6.0, pixelKm, local * 0.8, 1.0) + roadFamily(p.yx, 1.6, 0.11, 6.0, pixelKm, local * 0.8, 2.0);
+  float street = roadFamily(p, 0.31, 0.055, 2.3, pixelKm, local * 0.45, 3.0) + roadFamily(p.yx, 0.27, 0.055, 2.3, pixelKm, local * 0.45, 4.0);
+  float scatter = scatterLights(km, 0.42, pixelKm, local * 0.85, 5.0) + scatterLights(km, 0.13, pixelKm, local * 0.8, 6.0);
+  float level = energy / (1.0 + 1.3 * energy);
+  vec3 sodium = vec3(1.0, 0.6, 0.27);
+  vec3 led = vec3(1.0, 0.88, 0.74);
+  vec3 cool = vec3(0.82, 0.9, 1.0);
+  vec3 lights = sodium * min(arterial * level * 0.15, 3.0);
+  lights += mix(sodium, led, 0.6) * min(street * level * 0.09, 1.5);
+  lights += mix(led, cool, 0.35) * min(scatter * level * 0.17, 2.6);
+  return lights;
+}
 
 void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
@@ -55,7 +151,11 @@ void main() {
   float japan = uJapanMix * inside;
   if (japan > 0.0) {
     vec2 juv = clamp(jp, 0.0, 1.0);
-    night = mix(night, texture(uJapanNight, juv).rgb, japan);
+    vec3 japanNight = texture(uJapanNight, juv).rgb;
+    if (uDetail > 0.001) {
+      japanNight = mix(japanNight, bicubic(uJapanNight, juv), uDetail);
+    }
+    night = mix(night, japanNight, japan);
     day = mix(day, texture(uJapanDay, juv).rgb, japan * 0.6);
   }
   float cloud = texture(uClouds, uv + vec2(uCloudShift, 0.0)).r;
@@ -77,16 +177,16 @@ void main() {
 
   float nightAmount = 1.0 - smoothstep(-0.18, 0.04, mu);
   float lights = cityLight(night);
-  if (uDetail > 0.001) {
-    float coarse = valueNoise3(vPos * 900.0);
-    float fine = valueNoise3(vPos * 2600.0 + 7.0);
-    float speck = valueNoise3(vPos * 7000.0 + 3.0);
-    float sparkle = smoothstep(0.32, 0.95, coarse * 0.5 + fine * 0.35 + speck * 0.3);
-    float compress = 1.0 / (1.0 + lights * 2.4);
-    lights = mix(lights, lights * compress * (0.15 + 1.9 * sparkle), uDetail);
-  }
   vec3 lightColor = mix(vec3(1.0, 0.5, 0.2), vec3(1.0, 0.8, 0.56), clamp(lights * 1.5, 0.0, 1.0));
   vec3 city = lightColor * (lights * 1.6 + lights * lights * 2.0) * uLights;
+  if (uDetail > 0.001) {
+    vec2 km = vec2((lon - uTargetLonLat.x) * 111.32 * cos(radians(lat)), (lat - uTargetLonLat.y) * 110.57);
+    float pixelKm = max(length(fwidth(km)), 1e-5);
+    float energy = lights * 1.6 + lights * lights * 2.0;
+    vec3 grid = urbanLights(km, energy, pixelKm);
+    vec3 skyglow = lightColor * energy / (1.0 + energy) * 0.05;
+    city = mix(city, (grid * 0.82 + skyglow) * uLights, uDetail);
+  }
   float lum = dot(night, vec3(0.2126, 0.7152, 0.0722));
   vec3 moon = mix(vec3(lum), night, 0.4) * vec3(0.5, 0.82, 0.92) * 0.22;
   vec3 color = surface + (city + moon) * nightAmount;

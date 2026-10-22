@@ -20,4 +20,8 @@ await Promise.all([
     resolve(root, "../licenses/onnxruntime/LICENSE"),
     resolve(output, "onnxruntime-web-LICENSE"),
   ),
+  copyFile(
+    resolve(root, "../licenses/onnxruntime/ThirdPartyNotices.txt"),
+    resolve(output, "onnxruntime-ThirdPartyNotices.txt"),
+  ),
 ]);

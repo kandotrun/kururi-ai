@@ -40,6 +40,7 @@ import {
   INTRO_SECONDS,
   type IntroPhase,
   PHASE_STARTS,
+  type StageMix,
   createStageMix,
   stageMix,
 } from "./timeline";
@@ -450,9 +451,9 @@ class IntroRuntime implements IntroController {
 
   private warmUp(): void {
     const target = this.post.targetB;
-    this.renderStage("globe", 2.6, target);
-    this.renderStage("city", 6.8, target);
-    this.renderStage("room", 8.4, target);
+    this.renderStage("globe", 2.6, target, 0);
+    this.renderStage("city", 6.8, target, 0);
+    this.renderStage("room", 8.4, target, 0);
     this.renderer.setRenderTarget(null);
   }
 
@@ -518,9 +519,10 @@ class IntroRuntime implements IntroController {
     const params = this.params;
     params.weightA = 0;
     params.weightB = 0;
-    let slot = this.layer("globe", mix.globe, time, 0);
-    slot = this.layer("city", mix.city, time, slot);
-    this.layer("room", mix.room, time, slot);
+    params.portal = 0;
+    let slot = this.layer("globe", mix.globe, time, 0, mix);
+    slot = this.layer("city", mix.city, time, slot, mix);
+    this.layer("room", mix.room, time, slot, mix);
     const skipFade =
       this.skipStartedAt === null
         ? 1
@@ -547,15 +549,21 @@ class IntroRuntime implements IntroController {
     weight: number,
     time: number,
     slot: number,
+    mix: StageMix,
   ): number {
-    if (weight <= 0.001 || slot > 1) {
+    const portal = stage === "room" && slot === 1 && mix.portal > 0.001;
+    if ((weight <= 0.001 && !portal) || slot > 1) {
       return slot;
     }
     this.renderStage(
       stage,
       time,
       slot === 0 ? this.post.targetA : this.post.targetB,
+      mix.opening,
     );
+    if (portal) {
+      this.params.portal = mix.portal;
+    }
     if (slot === 0) {
       this.params.weightA = weight;
     } else {
@@ -568,6 +576,7 @@ class IntroRuntime implements IntroController {
     stage: StageName,
     time: number,
     target: WebGLRenderTarget,
+    portal: number,
   ): void {
     const renderer = this.renderer;
     renderer.setRenderTarget(target);
@@ -585,7 +594,10 @@ class IntroRuntime implements IntroController {
       renderer.render(this.globe.scene, this.globe.camera);
     } else if (stage === "city") {
       this.path.city(time, this.pose);
-      this.city.update(time, this.pose, width, height, ratio);
+      this.city.update(time, this.pose, width, height, ratio, portal);
+      if (portal > 0.001) {
+        this.city.portalQuad(this.params.portalQuad);
+      }
       renderer.render(this.city.scene, this.city.camera);
     } else {
       this.path.room(time, this.pose);

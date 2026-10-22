@@ -21,7 +21,14 @@ describe("readAppConfig", () => {
       workers: null,
       model: "nano",
       intro: true,
+      forceReducedMotion: false,
     });
+  });
+
+  it("keeps the URL motion override apart from the OS preference", () => {
+    expect(readAppConfig("", { ...desktop, prefersReducedMotion: true }).forceReducedMotion).toBe(false);
+    expect(readAppConfig("?motion=reduce", desktop).forceReducedMotion).toBe(true);
+    expect(readAppConfig("", desktop).forceReducedMotion).toBe(false);
   });
 
   it("skips the intro when asked or when motion should be reduced", () => {
@@ -48,6 +55,7 @@ describe("readAppConfig", () => {
       workers: 2,
       model: "nano",
       intro: false,
+      forceReducedMotion: true,
     });
   });
 

@@ -48,7 +48,7 @@ describe("modelOptions", () => {
     const options = modelOptions({ webgpu: false, fullBaseUrl: "/full/" });
     expect(options[1]).toMatchObject({
       available: false,
-      unavailableReason: "このブラウザは WebGPU に対応していないため使えません。",
+      unavailableReason: "このブラウザは WebGPU に対応していないため使えません",
     });
   });
 });
@@ -66,7 +66,7 @@ describe("resolveModel", () => {
   it("falls back to nano with the reason when the full model cannot run", () => {
     expect(resolveModel("full", noGpu)).toEqual({
       model: "nano",
-      notice: "高精度モデルは使えないため、軽量モデルで判定します。このブラウザは WebGPU に対応していないため使えません。",
+      notice: "このブラウザは WebGPU に対応していないため、軽量モデルで判定します。",
     });
   });
 

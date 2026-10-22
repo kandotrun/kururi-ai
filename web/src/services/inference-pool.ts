@@ -46,14 +46,17 @@ interface Slot {
   ready: boolean;
   alive: boolean;
   restarts: number;
+  healthy: number;
   job: Job | null;
   progress: { loaded: number; total: number } | null;
 }
 
 const MAX_RESTARTS = 1;
+const HEALTHY_RUN = 20;
 const CRASHED = "推論ワーカーが停止しました";
 const NO_WORKERS = "推論ワーカーを起動できませんでした";
 const DISPOSED = "推論を停止しました";
+const JAPANESE = /[぀-ヿ一-鿿]/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -138,6 +141,8 @@ export function createInferencePool(options: PoolOptions): InferencePool {
   const slots: Slot[] = [];
   let disposed = false;
   let readySettled = false;
+  let started = false;
+  let startError: string | null = null;
   let resolveReady: () => void = () => {};
   let rejectReady: (error: Error) => void = () => {};
   const ready = new Promise<void>((resolve, reject) => {
@@ -171,6 +176,7 @@ export function createInferencePool(options: PoolOptions): InferencePool {
       rejectReady(error);
       return;
     }
+    started = true;
     resolveReady();
     const { total } = progressTotals();
     options.onProgress?.({ loaded: total, total, ready: true });
@@ -182,11 +188,16 @@ export function createInferencePool(options: PoolOptions): InferencePool {
     }
   }
 
+  function stoppedMessage(): string {
+    return started ? CRASHED : (startError ?? NO_WORKERS);
+  }
+
   function checkReady(): void {
     const alive = slots.filter((slot) => slot.alive);
     if (alive.length === 0) {
-      settleReady(new Error(NO_WORKERS));
-      rejectQueue(NO_WORKERS);
+      const message = stoppedMessage();
+      settleReady(new Error(message));
+      rejectQueue(message);
       return;
     }
     if (alive.every((slot) => slot.ready)) {
@@ -223,11 +234,16 @@ export function createInferencePool(options: PoolOptions): InferencePool {
     return job;
   }
 
-  function crash(slot: Slot, message: string): void {
+  function halt(slot: Slot, message: string): void {
     finishJob(slot)?.reject(new Error(message));
     slot.worker.terminate();
     slot.ready = false;
     slot.progress = null;
+    slot.healthy = 0;
+  }
+
+  function crash(slot: Slot, message: string): void {
+    halt(slot, message);
     if (slot.restarts < MAX_RESTARTS) {
       slot.restarts += 1;
       slot.worker = options.createWorker();
@@ -235,6 +251,14 @@ export function createInferencePool(options: PoolOptions): InferencePool {
     } else {
       slot.alive = false;
     }
+    checkReady();
+    pump();
+  }
+
+  function retire(slot: Slot, message: string): void {
+    halt(slot, message);
+    slot.alive = false;
+    startError = JAPANESE.test(message) ? message : startError;
     checkReady();
     pump();
   }
@@ -258,12 +282,16 @@ export function createInferencePool(options: PoolOptions): InferencePool {
     if (message.type === "result") {
       if (slot.job?.id === message.id) {
         finishJob(slot)?.resolve(toPrediction(message));
+        slot.healthy += 1;
+        if (slot.healthy >= HEALTHY_RUN) {
+          slot.restarts = 0;
+        }
         pump();
       }
       return;
     }
     if (!slot.ready) {
-      crash(slot, message.message);
+      retire(slot, message.message);
       return;
     }
     if (slot.job && (message.id === undefined || slot.job.id === message.id)) {
@@ -295,6 +323,7 @@ export function createInferencePool(options: PoolOptions): InferencePool {
       ready: false,
       alive: true,
       restarts: 0,
+      healthy: 0,
       job: null,
       progress: null,
     };
@@ -303,7 +332,9 @@ export function createInferencePool(options: PoolOptions): InferencePool {
   }
 
   return {
-    size,
+    get size() {
+      return slots.filter((slot) => slot.alive).length;
+    },
     ready,
     idleCount() {
       if (disposed) {
@@ -317,7 +348,7 @@ export function createInferencePool(options: PoolOptions): InferencePool {
         return Promise.reject(new Error(DISPOSED));
       }
       if (!slots.some((slot) => slot.alive)) {
-        return Promise.reject(new Error(NO_WORKERS));
+        return Promise.reject(new Error(stoppedMessage()));
       }
       return new Promise<Prediction>((resolve, reject) => {
         queue.push({ id, blob, simulated, resolve, reject });

@@ -88,7 +88,9 @@ function isHeic(file: File): boolean {
   );
 }
 
-function createLimiter(max: number): <T>(task: () => Promise<T>) => Promise<T> {
+export type TaskLimiter = <T>(task: () => Promise<T>) => Promise<T>;
+
+function createLimiter(max: number): TaskLimiter {
   let running = 0;
   const queue: Array<() => void> = [];
   return async <T>(task: () => Promise<T>): Promise<T> => {
@@ -352,27 +354,22 @@ export function createImageLoader(options: ImageLoaderOptions): ImageLoader {
   };
 }
 
-export type VisitorPreviewOptions = Pick<
-  ImageLoaderOptions,
-  "decode" | "resize" | "orient" | "render" | "readBytes"
->;
+export interface VisitorPreviewOptions
+  extends Pick<
+    ImageLoaderOptions,
+    "decode" | "resize" | "orient" | "render" | "readBytes"
+  > {
+  maxSide: number;
+  concurrency?: number;
+  slots?: TaskLimiter;
+}
 
-export async function visitorPreviewBlob(
-  file: File,
-  maxSide: number,
-  options: VisitorPreviewOptions = {},
-): Promise<Blob> {
-  if (classifyPhotoFile(file.name, file.type) !== "raw") {
-    return file;
-  }
-  const loader = createImageLoader({
-    ...options,
-    tileSize: maxSide,
-    timeoutMs: 0,
-    rawMaxSide: maxSide,
-    heavyDecodes: 1,
-  });
-  const loaded = await loader.load({
+export type VisitorPreview = (file: File) => Promise<Blob>;
+
+const VISITOR_PREVIEW_CONCURRENCY = 2;
+
+function previewSource(file: File): PhotoSource {
+  return {
     id: "visitor-preview",
     kind: "user",
     title: file.name,
@@ -382,7 +379,42 @@ export async function visitorPreviewBlob(
     file,
     attribution: null,
     uprightFix: null,
+  };
+}
+
+export function createVisitorPreviews(
+  options: VisitorPreviewOptions,
+): VisitorPreview {
+  const { maxSide, concurrency, slots, ...ports } = options;
+  const limit = Math.max(1, concurrency ?? VISITOR_PREVIEW_CONCURRENCY);
+  const run = slots ?? createLimiter(limit);
+  const loader = createImageLoader({
+    ...ports,
+    tileSize: maxSide,
+    timeoutMs: 0,
+    rawMaxSide: maxSide,
+    heavyDecodes: limit,
   });
-  loaded.bitmap.close();
-  return loaded.blob;
+  return async (file) => {
+    if (classifyPhotoFile(file.name, file.type) !== "raw") {
+      return file;
+    }
+    return run(async () => {
+      const loaded = await loader.load(previewSource(file));
+      loaded.bitmap.close();
+      return loaded.blob;
+    });
+  };
+}
+
+const sharedPreviewSlots = createLimiter(VISITOR_PREVIEW_CONCURRENCY);
+const sharedPreviews = new Map<number, VisitorPreview>();
+
+export function visitorPreviewBlob(file: File, maxSide: number): Promise<Blob> {
+  let preview = sharedPreviews.get(maxSide);
+  if (!preview) {
+    preview = createVisitorPreviews({ maxSide, slots: sharedPreviewSlots });
+    sharedPreviews.set(maxSide, preview);
+  }
+  return preview(file);
 }

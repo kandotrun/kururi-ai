@@ -2,7 +2,7 @@ import type { PerspectiveCamera } from "three";
 import type { ViewInsets } from "../contracts";
 import {
   ARRIVAL_DEPTH,
-  ARRIVAL_PITCH,
+  ARRIVAL_OMEGA,
   ARRIVAL_WIDTH,
   type AreaSize,
   type BandBox,
@@ -12,6 +12,7 @@ import {
   type FrameSubject,
   type GridCell,
   type ViewFrame,
+  arrivalFrame,
   focusArea,
   followArea,
   frameArea,
@@ -45,6 +46,7 @@ export interface DirectorFrame {
   viewWidth: number;
   viewHeight: number;
   insets: ViewInsets;
+  settled: boolean;
 }
 
 export interface BandAnchor extends GridCell {
@@ -76,12 +78,15 @@ const REVEAL_MIN_PLACED = 60;
 const REVEAL_MARGIN = 0.9;
 const REVEAL_PADDING = 1.03;
 const IDLE_WIDE_SECONDS = 7;
+const SETTLED_WIDE_SECONDS = 0.35;
+const INSET_SETTLE_SECONDS = 1.0;
+const INSET_OMEGA = 6;
+const SETTLED_OMEGA = 3.2;
 const USER_IDLE_SECONDS = 8;
 const MIN_DISTANCE = 2.2;
 const MIN_PITCH = 34 * DEG;
 const MAX_PITCH = 80 * DEG;
 const MAX_USER_YAW = 40 * DEG;
-const ARRIVAL_OMEGA = 1.35;
 const FOLLOW_OMEGA = 1.8;
 const FOCUS_OMEGA = 2.1;
 const VISITOR_OMEGA = 1.6;
@@ -157,6 +162,9 @@ export class CameraDirector {
   private revealUntil = 0;
   private lastRevealAt = 0;
   private lastRevealPlaced = 0;
+  private settledReveal = false;
+  private quickUntil = Number.NEGATIVE_INFINITY;
+  private readonly lastInsets: ViewInsets = { top: 0, right: 0, bottom: 0, left: 0 };
   private lastUserInput = Number.NEGATIVE_INFINITY;
   private heldX = 0;
   private heldZ = 0;
@@ -253,6 +261,7 @@ export class CameraDirector {
     now: number,
     placed: number,
     lastPlacedAt: number,
+    settled: boolean,
   ): number | null {
     let next = Number.POSITIVE_INFINITY;
     if (this.mode === "user") {
@@ -262,7 +271,10 @@ export class CameraDirector {
       next = Math.min(next, this.revealUntil);
     }
     if (this.mode === "follow" && placed > 0) {
-      next = Math.min(next, lastPlacedAt + IDLE_WIDE_SECONDS);
+      next = Math.min(
+        next,
+        lastPlacedAt + (settled ? SETTLED_WIDE_SECONDS : IDLE_WIDE_SECONDS),
+      );
     }
     if (!Number.isFinite(next) || next <= now) {
       return null;
@@ -272,6 +284,9 @@ export class CameraDirector {
 
   update(frame: DirectorFrame): boolean {
     this.frame = viewFrame(frame.viewWidth, frame.viewHeight, frame.insets);
+    if (this.noteInsets(frame.insets) && this.initialised) {
+      this.quickUntil = frame.now + INSET_SETTLE_SECONDS;
+    }
     const mode = this.chooseMode(frame);
     this.mode = mode;
     this.computeTarget(mode, frame);
@@ -289,7 +304,10 @@ export class CameraDirector {
       this.snap();
       this.initialised = true;
     }
-    const omega = target.omega;
+    const omega =
+      frame.now < this.quickUntil
+        ? Math.max(target.omega, INSET_OMEGA)
+        : target.omega;
     const dt = frame.dt;
     springStep(this.x, target.x, omega, dt);
     springStep(this.z, target.z, omega, dt);
@@ -346,6 +364,20 @@ export class CameraDirector {
     return this.shiftY.value;
   }
 
+  private noteInsets(insets: ViewInsets): boolean {
+    const last = this.lastInsets;
+    const changed =
+      last.top !== insets.top ||
+      last.right !== insets.right ||
+      last.bottom !== insets.bottom ||
+      last.left !== insets.left;
+    last.top = insets.top;
+    last.right = insets.right;
+    last.bottom = insets.bottom;
+    last.left = insets.left;
+    return changed;
+  }
+
   private enterUser(now: number): void {
     if (this.mode !== "user") {
       this.user.x = this.x.value;
@@ -377,14 +409,17 @@ export class CameraDirector {
       return "reveal";
     }
     const quiet = frame.placed > 0 && frame.band.count === 0;
+    if (!quiet || !frame.settled) {
+      this.settledReveal = false;
+    }
     if (now < this.revealUntil || (quiet && this.mode === "reveal")) {
       return "reveal";
     }
+    const wait = frame.settled ? SETTLED_WIDE_SECONDS : IDLE_WIDE_SECONDS;
     const idle =
-      frame.placed > 0 &&
-      frame.band.count === 0 &&
-      now - frame.lastPlacedAt > IDLE_WIDE_SECONDS;
+      quiet && frame.falling === 0 && now - frame.lastPlacedAt > wait;
     if (idle) {
+      this.settledReveal = frame.settled;
       this.lastRevealAt = now;
       this.lastRevealPlaced = frame.placed;
       return "reveal";
@@ -449,12 +484,16 @@ export class CameraDirector {
     );
     const growth = ARRIVAL_WIDTH + FOLLOW_GROWTH * Math.sqrt(prints);
     const minWidth = Math.min(preferred, growth);
+    const margin = holding ? HOLD_BAND_MARGIN : this.bandMargin();
+    const band = frame.band;
+    const bandWidth = band.count > 0 ? band.maxX - band.minX + 2 * margin : 0;
+    const bandDepth = band.count > 0 ? band.maxZ - band.minZ + 2 * margin : 0;
     return {
-      margin: holding ? HOLD_BAND_MARGIN : this.bandMargin(),
+      margin,
       minWidth,
       minDepth: Math.max(ARRIVAL_DEPTH, minWidth * FOLLOW_DEPTH_RATIO),
-      maxWidth: Math.max(minWidth, this.legibleWidth()),
-      maxDepth: Math.max(ARRIVAL_DEPTH, this.legibleDepth()),
+      maxWidth: Math.max(minWidth, this.legibleWidth(), bandWidth),
+      maxDepth: Math.max(ARRIVAL_DEPTH, this.legibleDepth(), bandDepth),
     };
   }
 
@@ -568,7 +607,7 @@ export class CameraDirector {
       this.aim(
         shot,
         area,
-        REVEAL_OMEGA,
+        this.settledReveal ? SETTLED_OMEGA : REVEAL_OMEGA,
         Math.max(4, this.areaRadius(area) * 0.88),
       );
       return;
@@ -580,13 +619,11 @@ export class CameraDirector {
         minZ: -ARRIVAL_DEPTH / 2,
         maxZ: ARRIVAL_DEPTH / 2,
       };
-      const shot = frameArea(
-        area,
-        ARRIVAL_PITCH,
-        BASE_YAW,
-        view.fovY,
-        view.aspect,
-      );
+      const shot = arrivalFrame(
+        frame.viewWidth,
+        frame.viewHeight,
+        frame.insets,
+      ).view;
       this.aim(shot, area, ARRIVAL_OMEGA, this.areaRadius(area) * 1.32);
       return;
     }

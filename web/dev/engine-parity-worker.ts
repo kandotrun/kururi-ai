@@ -108,20 +108,20 @@ async function handle(request: ProbeRequest): Promise<void> {
     const started = performance.now();
     const image = await decodeRgb(request.file, turns);
     const decodeMs = performance.now() - started;
+    const width = turns % 2 === 0 ? image.width : image.height;
+    const height = turns % 2 === 0 ? image.height : image.width;
     const rgbDifference =
       request.reference === null
         ? null
-        : difference(
-            image,
-            rotateRgbClockwise(
-              {
-                data: new Uint8Array(request.reference),
-                width: turns % 2 === 0 ? image.width : image.height,
-                height: turns % 2 === 0 ? image.height : image.width,
-              },
-              turns,
-            ),
-          );
+        : request.reference.byteLength !== width * height * 3
+          ? { maxAbs: 255, meanAbs: 255, differing: 1, sameSize: false }
+          : difference(
+              image,
+              rotateRgbClockwise(
+                { data: new Uint8Array(request.reference), width, height },
+                turns,
+              ),
+            );
     await probe(request.id, image, { decodeMs, rgbDifference });
     return;
   }

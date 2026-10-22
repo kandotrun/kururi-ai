@@ -5,22 +5,27 @@ export interface PoolFactories {
   full(): InferencePool;
 }
 
+export interface ChosenPool {
+  pool: InferencePool;
+  model: ModelId;
+}
+
 export async function choosePool(
   model: ModelId,
   factories: PoolFactories,
   onFallback: (error: unknown) => void,
-): Promise<InferencePool> {
+): Promise<ChosenPool> {
   if (model === "nano") {
-    return factories.nano();
+    return { pool: await factories.nano(), model: "nano" };
   }
   let full: InferencePool | null = null;
   try {
     full = factories.full();
     await full.ready;
-    return full;
+    return { pool: full, model: "full" };
   } catch (error) {
     full?.dispose();
     onFallback(error);
-    return factories.nano();
+    return { pool: await factories.nano(), model: "nano" };
   }
 }

@@ -6,6 +6,13 @@ const base = process.env.INTRO_URL ?? "http://127.0.0.1:5173/dev/intro.html";
 const outDir = process.argv[2];
 const only = process.argv[3] ? process.argv[3].split(",") : ["desktop", "mobile"];
 const at = Number(process.argv[4] ?? 9380);
+const insetsArg = process.env.MATCH_INSETS ?? "";
+const handoffInsets = Object.fromEntries(
+  insetsArg
+    .split(";")
+    .filter((entry) => entry.includes("="))
+    .map((entry) => entry.split("=")),
+);
 if (!outDir) {
   throw new Error("usage: node dev/intro-match.mjs <out-dir> [desktop,mobile] [ms]");
 }
@@ -43,6 +50,26 @@ for (const name of only) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.screenshot({ path: join(outDir, `${name}-desk.png`) });
   console.log(`[${name}] desk=${await page.evaluate(() => window.__intro.desk !== null)}`);
+  const insets = handoffInsets[name];
+  if (insets) {
+    const [top, right, bottom, left] = insets.split(",").map(Number);
+    await page.evaluate(() => {
+      document.querySelector(".intro-canvas").style.visibility = "visible";
+    });
+    const started = await page.evaluate(
+      (value) => {
+        window.__intro.seek(10000);
+        window.__intro.setInsets(value);
+        return performance.now();
+      },
+      { top, right, bottom, left },
+    );
+    for (const offset of [300, 600, 900, 1500, 3000]) {
+      await page.waitForFunction((at) => performance.now() >= at, started + offset, { polling: 16 });
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await page.screenshot({ path: join(outDir, `${name}-insets-${String(offset).padStart(4, "0")}.png`) });
+    }
+  }
   await page.close();
 }
 await browser.close();

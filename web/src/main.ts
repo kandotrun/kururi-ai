@@ -29,7 +29,12 @@ import { detectWebGpu, type GpuLike } from "./full/webgpu";
 import { createIntro, type Intro } from "./intro/intro";
 import { holdLandings } from "./landing-gate";
 import { createLazyPool } from "./lazy-pool";
-import { createDeskScene, WebGLUnavailableError } from "./scene/desk-scene";
+import {
+  createDeskScene,
+  onDeskSceneContext,
+  setDeskSettled,
+  WebGLUnavailableError,
+} from "./scene/desk-scene";
 import { createImageLoader } from "./services/image-loader";
 import { createInferencePool, poolSize } from "./services/inference-pool";
 import { loadModels } from "./services/model-loader";
@@ -45,6 +50,8 @@ const STATS_INTERVAL_MS = 1_000;
 const FALLBACK_CAPACITY = { desktop: 3200, lowPower: 900 };
 const TOKYO: GeoPoint = { lat: 35.6812, lon: 139.7671 };
 const MAX_ORIGINS = 3000;
+const FULL_CONFIRMED_KEY = "kururi-full-confirmed";
+const FULL_CACHE_PREFIX = "kururi-ai-full-";
 
 interface VisitorBatch {
   progress: FolderProgress;
@@ -88,7 +95,10 @@ let latestBatch: VisitorBatch | null = null;
 let reducedMotion = config.reducedMotion;
 let stream: Stream | null = null;
 let intro: Intro | null = null;
+let introSkipRequested = false;
+let activeModel: ModelId = "nano";
 let modelReady = false;
+let modelError: string | null = null;
 let streamStatus: StreamStatus = "loading-model";
 let pinned: string | null = null;
 let pausedByVisitor = false;
@@ -125,7 +135,7 @@ const overlay = mountOverlay(appRoot, {
     switchModel(id);
   },
   skipIntro() {
-    intro?.skip();
+    requestIntroSkip();
   },
 });
 
@@ -134,6 +144,11 @@ if (config.intro) {
   overlay.canvas.style.visibility = "hidden";
 } else {
   openLandingGate();
+}
+
+function requestIntroSkip(): void {
+  introSkipRequested = true;
+  intro?.skip();
 }
 
 function createScene(): DeskScene {
@@ -154,6 +169,11 @@ function createScene(): DeskScene {
 }
 
 const scene = createScene();
+onDeskSceneContext(scene, (state) => {
+  if (state === "failed") {
+    overlay.webglUnavailable();
+  }
+});
 scene.setViewInsets(overlay.viewInsets());
 overlay.onViewInsetsChange((insets) => scene.setViewInsets(insets));
 
@@ -174,19 +194,39 @@ async function acceptVisitorFiles(files: File[]): Promise<void> {
   for (const photo of photos) {
     pendingBatchFiles.set(photo, batch);
   }
-  intro?.skip();
+  requestIntroSkip();
   if (stream) {
-    stream.addUserFiles(photos);
+    handOff(stream, photos);
   } else {
     pendingFiles.push(...photos);
   }
 }
 
+function handOff(target: Stream, photos: File[]): void {
+  for (const file of target.addUserFiles(photos)) {
+    const batch = pendingBatchFiles.get(file);
+    if (!batch) {
+      continue;
+    }
+    pendingBatchFiles.delete(file);
+    batch.progress = {
+      ...batch.progress,
+      accepted: batch.progress.accepted - 1,
+    };
+    settleBatch(batch);
+  }
+}
+
 function settleBatch(batch: VisitorBatch): void {
   batch.remaining -= 1;
-  if (batch.remaining <= 0 && batch === latestBatch) {
+  if (batch !== latestBatch) {
+    return;
+  }
+  if (batch.remaining <= 0) {
     overlay.setFolderProgress({ ...batch.progress, done: true });
     latestBatch = null;
+  } else {
+    overlay.setFolderProgress({ ...batch.progress });
   }
 }
 
@@ -211,14 +251,50 @@ function select(id: string | null, fromOverlay: boolean): void {
   }
 }
 
+function rememberFullConfirmed(): void {
+  try {
+    window.sessionStorage.setItem(FULL_CONFIRMED_KEY, "1");
+  } catch {
+    return;
+  }
+}
+
+function takeFullConfirmed(): boolean {
+  try {
+    const confirmed = window.sessionStorage.getItem(FULL_CONFIRMED_KEY) === "1";
+    window.sessionStorage.removeItem(FULL_CONFIRMED_KEY);
+    return confirmed;
+  } catch {
+    return false;
+  }
+}
+
+async function fullModelCached(): Promise<boolean> {
+  try {
+    const names = await window.caches.keys();
+    return names.some((name) => name.startsWith(FULL_CACHE_PREFIX));
+  } catch {
+    return false;
+  }
+}
+
 function switchModel(id: ModelId): void {
   const url = new URL(window.location.href);
+  url.searchParams.delete("model");
   if (id === "full") {
+    rememberFullConfirmed();
     url.searchParams.set("model", "full");
-  } else {
-    url.searchParams.delete("model");
   }
   window.location.assign(url.toString());
+}
+
+function forgetModelInAddress(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("model")) {
+    return;
+  }
+  url.searchParams.delete("model");
+  window.history.replaceState(window.history.state, "", url.toString());
 }
 
 scene.on("hover", (id, at) => {
@@ -268,9 +344,17 @@ store.subscribe((state, action) => {
 });
 
 function showStatus(): void {
+  if (modelError !== null) {
+    overlay.setStatus("model-failed");
+    return;
+  }
   overlay.setStatus(
     !modelReady && streamStatus === "running" ? "loading-model" : streamStatus,
   );
+}
+
+function sentence(text: string): string {
+  return /[。．！？]$/.test(text) ? text : `${text}。`;
 }
 
 async function loadSources(limit: number): Promise<PhotoSource[]> {
@@ -381,13 +465,27 @@ async function chooseModel(): Promise<{
   model: ModelId;
   options: ModelOption[];
 }> {
+  const confirmed = takeFullConfirmed();
+  forgetModelInAddress();
   const webgpu = await detectWebGpu(navigatorHints.gpu).catch(() => false);
   const options = modelOptions({ webgpu, fullBaseUrl });
   const { model, notice } = resolveModel(config.model, options);
-  overlay.setModels(model, options);
   if (notice) {
     overlay.notice(notice);
   }
+  if (model === "full" && !confirmed && !(await fullModelCached())) {
+    overlay.setModels("nano", options);
+    const full = options.find((option) => option.id === "full");
+    if (full) {
+      void overlay.confirmFullModel(full).then((accepted) => {
+        if (accepted) {
+          switchModel("full");
+        }
+      });
+    }
+    return { model: "nano", options };
+  }
+  overlay.setModels(model, options);
   return { model, options };
 }
 
@@ -414,11 +512,9 @@ async function playIntro(origins: readonly GeoPoint[]): Promise<void> {
       lowPower: config.lowPower,
     });
     overlay.canvas.style.visibility = "";
-    intro.onPhase((phase) => {
-      if (phase === "handoff" || phase === "done") {
-        openLandingGate();
-      }
-    });
+    if (introSkipRequested) {
+      intro.skip();
+    }
     await intro.play();
   } catch (error) {
     console.warn(error);
@@ -437,6 +533,7 @@ async function boot(): Promise<void> {
   const sources = await loadSources(demoPhotoLimit());
   void playIntro(originsOf(sources));
   const { model, options } = await chooseModel();
+  activeModel = model;
   store.dispatch({ type: "totalChanged", total: sources.length });
   const chosen = choosePool(
     model,
@@ -446,12 +543,16 @@ async function boot(): Promise<void> {
     },
     (error) => {
       console.warn(error);
+      activeModel = "nano";
       overlay.setModels("nano", options);
-      overlay.notice(
-        `${error instanceof Error ? error.message : "高精度モデルを読み込めませんでした。"} 軽量モデルで判定します。`,
-      );
+      const reason =
+        error instanceof Error ? error.message : "高精度モデルを読み込めませんでした";
+      overlay.notice(`${sentence(reason)}軽量モデルで判定します。`);
     },
-  );
+  ).then((result) => {
+    activeModel = result.model;
+    return result.pool;
+  });
   const pool = createLazyPool(chosen, model === "full" ? 1 : nanoWorkers());
   pool.ready.then(
     () => {
@@ -460,9 +561,11 @@ async function boot(): Promise<void> {
     },
     (error: unknown) => {
       console.error(error);
-      overlay.notice(
-        error instanceof Error ? error.message : "モデルを読み込めませんでした。",
-      );
+      modelError =
+        error instanceof Error ? error.message : "モデルを読み込めませんでした";
+      stream?.pause();
+      overlay.notice(sentence(modelError));
+      showStatus();
     },
   );
   const renderWorkers = browserRenderWorkers(
@@ -489,21 +592,22 @@ async function boot(): Promise<void> {
     wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
     simulateUser: () => overlay.simulateUser(),
     reducedMotion: () => reducedMotion,
-    limits: limitsFor(model),
+    limits: () => limitsFor(activeModel),
     onStatus: (status) => {
       streamStatus = status;
+      setDeskSettled(scene, status === "finished");
       showStatus();
     },
     onNotice: (message) => overlay.notice(message),
   });
   stream.start();
   if (pendingFiles.length > 0) {
-    stream.addUserFiles(pendingFiles.splice(0));
+    handOff(stream, pendingFiles.splice(0));
   }
 }
 
 reducedMotionQuery.addEventListener("change", (event) => {
-  reducedMotion = event.matches || config.reducedMotion;
+  reducedMotion = event.matches || config.forceReducedMotion;
   scene.setReducedMotion(reducedMotion);
 });
 

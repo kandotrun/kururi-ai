@@ -17,7 +17,9 @@ export function createLazyPool(
   const ready = settled.then((resolved) => resolved.ready);
   ready.catch(() => {});
   return {
-    size,
+    get size() {
+      return pool && !disposed ? pool.size : size;
+    },
     ready,
     idleCount() {
       return pool && !disposed ? pool.idleCount() : 0;

@@ -453,8 +453,48 @@ describe("shipped manifest", () => {
       expect(aspect).toBeLessThanOrEqual(2);
       expect(item.width).toBeGreaterThan(960);
       expect(item.author.length).toBeGreaterThan(0);
-      expect([...item.author].length).toBeLessThanOrEqual(80);
     }
+  });
+
+  it("keeps every author credit whole and free of e-mail addresses", () => {
+    for (const item of manifest.items) {
+      expect(item.author, item.file).not.toMatch(/…$/);
+      expect(item.author, item.file).not.toContain("@");
+      expect(item.author, item.file).not.toMatch(/\(\s*\)/);
+      expect(item.author, item.file).not.toMatch(/^Feel free\b/);
+    }
+  });
+
+  it("keeps the attribution the licensors asked for", () => {
+    const authorOf = (file: string): string => {
+      const item = manifest.items.find((entry) => entry.file === file);
+      expect(item, file).toBeDefined();
+      return item?.author ?? "";
+    };
+    const expected: readonly [string, string][] = [
+      [
+        "Tulip_Tulipa_clusiana_'Lady_Jane'_Rock_Ledge_Flower_Edit_2000px.jpg",
+        "Co-attribution must be given to the Chanticleer Garden.",
+      ],
+      [
+        "Lotus_Nelumbo_'Mrs._Perry_D._Slocum'_Dried_Seed_Head_2000px.jpg",
+        "Co-attribution must be given to the Chanticleer Garden.",
+      ],
+      ["Audi_e-tron_(Edit1).jpg", "Retouched by: LiveChocolate"],
+      ["Rhinechis_scalaris_cropped.jpg", "derivative work: Papa Lima Whiskey 2"],
+      ["Translohr_STE4_-_143.jpg", "credit the author (William Crochot)"],
+      [
+        "Our_Lady_of_Mount_Carmel_and_St_Pauls_Pro-Cathedral.jpg",
+        "Please credit this with: Photo: Anton Zelenov",
+      ],
+      ["Hylobates_lar_-_Kaeng_Krachan_WB.jpg", "JJ Harrison"],
+    ];
+    for (const [file, credit] of expected) {
+      expect(authorOf(file), file).toContain(credit);
+    }
+    expect(authorOf("Malachitfalter,_Bambuspage,_Siproeta_stelenes_3.JPG")).toMatch(
+      /^Böhringer: Feel free to use my photos, but please mention me as the author/,
+    );
   });
 
   it("balances topics that all have a Japanese label", () => {

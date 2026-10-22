@@ -235,7 +235,8 @@ export type StreamStatus =
   | "running"
   | "paused"
   | "finished"
-  | "offline";
+  | "offline"
+  | "model-failed";
 
 export interface OverlayHandlers {
   addFiles(files: File[]): void;
@@ -264,6 +265,7 @@ export interface Overlay {
   viewInsets(): ViewInsets;
   onViewInsetsChange(handler: (insets: ViewInsets) => void): () => void;
   setFolderProgress(progress: FolderProgress | null): void;
+  confirmFullModel(option: ModelOption): Promise<boolean>;
 }
 
 export interface FolderProgress {
@@ -278,6 +280,6 @@ export interface Stream {
   start(): void;
   pause(): void;
   resume(): void;
-  addUserFiles(files: File[]): void;
+  addUserFiles(files: File[]): File[];
   dispose(): void;
 }

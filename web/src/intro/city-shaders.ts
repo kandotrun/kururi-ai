@@ -178,14 +178,63 @@ ${FILTER_GLSL}
 ${CITY_COMMON_GLSL}
 uniform vec3 uWindowCenter;
 uniform vec2 uWindowSize;
+uniform float uWindowFrame;
 uniform float uHeroGlow;
 uniform float uWindowGain;
+uniform float uPortal;
 
 varying vec3 vLocal;
 varying vec3 vSize;
 varying vec3 vNormalLocal;
 varying vec3 vWorld;
 varying vec4 vStyle;
+
+vec3 reflectedCity(vec3 origin, vec3 r) {
+  vec3 sky = skyColor(vec3(r.x, abs(r.y), r.z));
+  float reach = 70.0 / max(abs(r.z) + abs(r.x), 0.2);
+  vec2 q = origin.xy + vec2(r.x + r.z, r.y) * reach;
+  vec2 g = q / vec2(3.4, 3.7);
+  vec2 id = floor(g);
+  vec2 f = fract(g);
+  float pane = smoothstep(0.0, 0.3, f.x) * smoothstep(1.0, 0.7, f.x) * smoothstep(0.05, 0.35, f.y) * smoothstep(1.0, 0.7, f.y);
+  float on = step(0.72, hash12(id + 17.0)) * smoothstep(-0.35, -0.15, r.y) * smoothstep(0.45, 0.25, r.y);
+  vec3 tint = mix(vec3(1.0, 0.72, 0.44), vec3(0.8, 0.88, 1.0), step(0.5, hash12(id + 5.0)));
+  float block = smoothstep(0.38, 0.62, valueNoise(q / 26.0));
+  return sky * 2.2 + tint * pane * on * block * 0.5;
+}
+
+float span(float x, float a, float b, float w) {
+  return smoothstep(a - w, a + w, x) * (1.0 - smoothstep(b - w, b + w, x));
+}
+
+vec3 interior(vec2 cellFrac, vec3 ray, vec2 room, float depth, float seed, vec3 lamp, float office) {
+  vec3 start = vec3(cellFrac * room, 0.0);
+  float tx = ray.x > 0.0 ? (room.x - start.x) / ray.x : start.x / max(-ray.x, 1e-4);
+  float ty = ray.y > 0.0 ? (room.y - start.y) / ray.y : start.y / max(-ray.y, 1e-4);
+  float tz = depth / max(ray.z, 1e-4);
+  float t = min(min(tx, ty), tz);
+  vec3 h = start + ray * t;
+  float height = h.y / room.y;
+  vec3 color;
+  if (t == tz) {
+    float divider = step(0.55, hash12(vec2(seed, 41.0)));
+    float door = (1.0 - smoothstep(0.02, 0.05, abs(h.x / room.x - 0.3 - 0.4 * hash12(vec2(seed, 9.0))) - 0.09)) * step(height, 0.62);
+    color = vec3(0.26, 0.25, 0.23) * (0.5 + 0.5 * height) * (1.0 - 0.35 * divider * step(0.5, h.x / room.x));
+    color *= 1.0 - 0.55 * door;
+    color *= 1.0 - 0.5 * (1.0 - smoothstep(0.18, 0.22, height));
+  } else if (t == ty && ray.y > 0.0) {
+    float strip = filteredPulse(h.z / 1.7 + 0.25, 0.44, 0.56, 0.05) * filteredPulse(h.x / room.x, 0.12, 0.88, 0.05);
+    color = vec3(0.12) + vec3(2.2) * strip * office;
+  } else if (t == ty) {
+    float desk = step(0.35, fract(h.z / 1.6 + seed)) * step(fract(h.z / 1.6 + seed), 0.75);
+    color = vec3(0.07, 0.065, 0.06) * (0.6 + 0.4 * smoothstep(0.0, depth, h.z)) * (1.0 - 0.5 * desk);
+  } else {
+    color = vec3(0.18, 0.18, 0.17) * (0.55 + 0.45 * height);
+  }
+  float pool = exp(-pow((h.x / room.x - 0.5 + 0.3 * (seed - 0.5)) * 2.6, 2.0) - pow((height - 0.55) * 2.4, 2.0)) * (1.0 - office);
+  color *= mix(1.0, 0.55 + 1.6 * pool, 1.0 - office);
+  return color * lamp * (0.65 + 0.35 * smoothstep(depth, 0.0, h.z));
+}
 
 void main() {
   vec3 n = vNormalLocal;
@@ -205,6 +254,8 @@ void main() {
     color += vec3(0.8, 0.9, 1.0) * unit * spot * 0.25 * step(30.0, vSize.y);
   } else {
     bool sideX = abs(n.x) > 0.5;
+    vec3 normal = sideX ? vec3(sign(n.x), 0.0, 0.0) : vec3(0.0, 0.0, sign(n.z));
+    vec3 tangent = sideX ? vec3(0.0, 0.0, sign(n.x)) : vec3(-sign(n.z), 0.0, 0.0);
     float u = sideX ? p.z * sign(n.x) : -p.x * sign(n.z);
     float v = p.y;
     float face = sideX ? (n.x > 0.0 ? 1.0 : 2.0) : (n.z > 0.0 ? 3.0 : 4.0);
@@ -221,7 +272,8 @@ void main() {
     float y0 = mix(0.32, 0.16, office);
     float y1 = mix(0.8, 0.9, office);
     float cover = filteredPulse(cell.x, x0, 1.0 - x0, fw.x) * filteredPulse(cell.y, y0, y1, fw.y);
-    cover *= smoothstep(-0.05, 0.05, cell.y) * (1.0 - smoothstep(vSize.y - 1.6, vSize.y - 1.0, v));
+    float storeys = smoothstep(-0.05, 0.05, cell.y) * (1.0 - smoothstep(vSize.y - 1.6, vSize.y - 1.0, v));
+    cover *= storeys;
     cover *= 1.0 - warehouse * 0.7;
     float floorRandom = hash12(vec2(id.y, seed * 91.0 + face));
     float floorBias = office > 0.5 ? mix(0.1, 2.0, floorRandom * floorRandom) : mix(0.6, 1.35, floorRandom);
@@ -235,35 +287,68 @@ void main() {
     vec3 average = office > 0.5 ? mix(neutral, cool, 0.5) : mix(warm, neutral, 0.28);
     float shade = hash13(vec3(id, seed + 3.1));
     float bright = mix(0.28, 1.1, shade * shade);
-    float detail = 1.0 - smoothstep(0.3, 0.85, max(fw.x, fw.y));
-    vec2 inner = vec2((fract(cell.x) - x0) / (1.0 - 2.0 * x0), (fract(cell.y) - y0) / (y1 - y0));
-    float ceiling = 0.55 + 0.6 * smoothstep(0.35, 1.0, inner.y);
-    float furniture = 1.0 - 0.45 * (1.0 - smoothstep(0.16, 0.3, inner.y)) * step(0.4, hash13(vec3(id, seed + 8.0)));
-    float blinds = 1.0 - 0.55 * step(0.72, hash13(vec3(id, seed + 5.0))) * step(0.5, fract(inner.y * 7.0));
-    float interior = mix(1.0, ceiling * furniture * blinds, smoothstep(0.6, 0.15, max(fw.x, fw.y)));
-    vec3 emission = mix(average * probability * 0.9, windowColor * lit * bright * interior, detail) * uWindowGain;
+    float footprint = max(fw.x, fw.y);
+    float detail = 1.0 - smoothstep(0.3, 0.85, footprint);
+    float close = 1.0 - smoothstep(0.05, 0.22, footprint);
     vec3 glass = vec3(0.005, 0.0075, 0.0095);
+    vec3 near = windowColor * lit * bright;
+    vec3 view = normalize(vWorld - cameraPosition);
+    if (close > 0.001 && cover > 0.001) {
+      vec3 ray = vec3(dot(view, tangent), view.y, -dot(view, normal));
+      ray.z = max(ray.z, 0.05);
+      vec2 room = vec2(bay, floorHeight);
+      vec2 cellFrac = fract(cell);
+      vec2 recess = ray.xy / ray.z * 0.16 / room;
+      vec2 behind = cellFrac + recess;
+      vec2 fwc = fw;
+      float inGlass = span(behind.x, x0, 1.0 - x0, fwc.x) * span(behind.y, y0, y1, fwc.y);
+      float mullion = office * bandAA(behind.x - 0.5, 0.012, fwc.x);
+      float blindLevel = mix(y1, mix(y0, y1, 0.35), step(0.62, hash13(vec3(id, seed + 5.0))) * hash13(vec3(id, seed + 6.0)));
+      float blind = smoothstep(blindLevel - fwc.y, blindLevel + fwc.y, behind.y);
+      float slats = 0.75 + 0.25 * filteredPulse(behind.y * 34.0, 0.0, 0.55, fwc.y * 34.0);
+      vec3 lamp = windowColor * lit * bright * 1.15;
+      vec3 rooms = interior(behind, ray, room, mix(4.5, 3.4, 1.0 - office) + 1.5 * hash13(vec3(id, seed + 2.0)), hash13(vec3(id, seed + 7.0)), lamp, office);
+      rooms += vec3(0.006, 0.007, 0.008) * (1.0 - lit);
+      rooms = mix(rooms, lamp * vec3(0.26, 0.23, 0.19) * slats + vec3(0.01) * (1.0 - lit), blind);
+      vec3 r = reflect(view, normal);
+      float fresnel = 0.04 + 0.96 * pow(1.0 - clamp(-dot(view, normal), 0.0, 1.0), 5.0);
+      vec3 mirror = reflectedCity(vWorld, r) * fresnel;
+      vec3 reveal = vec3(0.012, 0.013, 0.013) + lamp * 0.05;
+      vec3 pane = mix(reveal, rooms * (1.0 - fresnel) + mirror, inGlass);
+      pane = mix(pane, vec3(0.022, 0.024, 0.026) + mirror * 0.4, mullion);
+      near = mix(near, pane, close);
+      glass = mix(glass, vec3(0.0), close);
+    }
+    vec3 emission = mix(average * probability * 0.9, near, detail) * uWindowGain;
     vec3 wall = mix(vec3(0.010, 0.012, 0.013), vec3(0.015, 0.016, 0.015), hash12(vec2(seed, 2.0)));
+    float spandrel = filteredPulse(cell.y, y1 + 0.02, 1.0 + y0 - 0.02, fw.y) * office;
+    wall *= 1.0 - 0.25 * spandrel;
+    float frameEdge = cover * (1.0 - filteredPulse(cell.x, x0 + 0.02, 0.98 - x0, fw.x) * filteredPulse(cell.y, y0 + 0.02, y1 - 0.02, fw.y)) * close;
     wall += vec3(0.05, 0.034, 0.02) * exp(-v / 10.0) * 0.5;
     color = mix(wall, glass + emission, cover);
+    color = mix(color, vec3(0.03, 0.032, 0.034) + windowColor * lit * bright * 0.05, frameEdge);
     float lobbyGlow = (1.0 - smoothstep(lobby - 0.6, lobby, v)) * smoothstep(0.4, 0.9, v) * office;
     color += vec3(1.0, 0.82, 0.62) * lobbyGlow * 0.12 * step(0.35, hash12(vec2(seed, face)));
     if (hero > 0.5 && n.z > 0.5) {
       vec2 local = vec2(vWorld.x - uWindowCenter.x, vWorld.y - uWindowCenter.y);
       vec2 halfSize = uWindowSize * 0.5;
+      vec2 glassHalf = halfSize - uWindowFrame;
       vec2 fwl = fwidth(local);
-      float inX = 1.0 - smoothstep(halfSize.x - fwl.x, halfSize.x + fwl.x, abs(local.x));
-      float inY = 1.0 - smoothstep(halfSize.y - fwl.y, halfSize.y + fwl.y, abs(local.y));
-      float inside = inX * inY;
-      float transom = 1.0 - (1.0 - smoothstep(0.03, 0.03 + fwl.y, abs(local.y - 0.55))) * 0.85;
-      float border = smoothstep(halfSize.x - 0.1, halfSize.x - 0.1 + fwl.x, abs(local.x)) + smoothstep(halfSize.y - 0.1, halfSize.y - 0.1 + fwl.y, abs(local.y));
+      float inside = (1.0 - smoothstep(halfSize.x - fwl.x, halfSize.x + fwl.x, abs(local.x))) * (1.0 - smoothstep(halfSize.y - fwl.y, halfSize.y + fwl.y, abs(local.y)));
+      float pane = (1.0 - smoothstep(glassHalf.x - fwl.x, glassHalf.x + fwl.x, abs(local.x))) * (1.0 - smoothstep(glassHalf.y - fwl.y, glassHalf.y + fwl.y, abs(local.y)));
       vec2 lampOffset = (local - vec2(-0.35, 0.05)) * vec2(1.0, 1.3);
-      float lamp = exp(-dot(lampOffset, lampOffset) * 5.0);
+      float lampSpot = exp(-dot(lampOffset, lampOffset) * 5.0);
       float pool = exp(-pow((local.y + 0.42) / 0.28, 2.0)) * exp(-pow(local.x / 0.9, 2.0));
       float desk = 1.0 - 0.6 * smoothstep(-0.62, -0.7, local.y);
-      vec3 room = vec3(1.0, 0.66, 0.38) * (0.14 + 0.12 * smoothstep(1.1, -0.6, local.y)) * desk + vec3(0.42, 0.66, 0.52) * pool * 0.3 + vec3(1.0, 0.8, 0.54) * lamp * 1.1;
-      vec3 heroWindow = room * uHeroGlow * transom * (1.0 - 0.9 * clamp(border, 0.0, 1.0));
-      color = mix(color, heroWindow, inside);
+      vec3 roomGlow = vec3(1.0, 0.66, 0.38) * (0.14 + 0.12 * smoothstep(1.1, -0.6, local.y)) * desk + vec3(0.42, 0.66, 0.52) * pool * 0.3 + vec3(1.0, 0.8, 0.54) * lampSpot * 1.1;
+      vec3 r = reflect(view, vec3(0.0, 0.0, 1.0));
+      float fresnel = 0.04 + 0.96 * pow(1.0 - clamp(-view.z, 0.0, 1.0), 5.0);
+      vec3 mirror = reflectedCity(vWorld, r) * fresnel * 0.7;
+      float sheen = smoothstep(0.6, 1.0, abs(local.x / glassHalf.x + 0.35 * local.y / glassHalf.y - 0.2)) * 0.012;
+      vec3 heroGlass = roomGlow * uHeroGlow * (1.0 - uPortal) + mirror + vec3(0.9, 0.95, 1.0) * sheen;
+      float sill = smoothstep(-glassHalf.y - uWindowFrame, -glassHalf.y, local.y) * (1.0 - step(-glassHalf.y, local.y));
+      vec3 frame = vec3(0.028, 0.029, 0.031) + vec3(1.0, 0.7, 0.42) * sill * 0.12 * uHeroGlow;
+      color = mix(color, mix(frame, heroGlass, pane), inside);
     }
   }
   gl_FragColor = vec4(applyFog(color, vWorld), 1.0);

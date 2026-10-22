@@ -5,6 +5,13 @@ const shots = process.argv[2];
 const fixture = process.argv[3] ?? process.env.FOLDER_FIXTURE ?? null;
 const browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader"] });
 const results = [];
+let reported = false;
+process.on("exit", () => {
+  if (!reported) {
+    console.log(results.join("\n"));
+    console.log("stopped before the end");
+  }
+});
 function check(name, ok, detail = "") {
   results.push(`${ok ? "ok  " : "FAIL"} ${name}${detail ? ` (${detail})` : ""}`);
 }
@@ -65,11 +72,11 @@ check("model option is hit", !hit.option.startsWith("canvas"), hit.option);
 
 const runningHeading = await headingName(page);
 check(
-  "running headline uses the straightened label",
-  runningHeading.label === "向きを直した写真" && runningHeading.spoken === "1,284枚" && runningHeading.hidden,
+  "running headline counts every placed photo",
+  runningHeading.label === "判定して並べた写真" && runningHeading.spoken === "1,284枚" && runningHeading.hidden,
   JSON.stringify(runningHeading),
 );
-const headingRole = await page.getByRole("heading", { level: 1, name: /向きを直した写真\s*1,284枚/ }).count();
+const headingRole = await page.getByRole("heading", { level: 1, name: /判定して並べた写真\s*1,284枚/ }).count();
 check("h1 accessible name is label plus number", headingRole === 1, String(headingRole));
 const headlineText = await page.evaluate(() => document.querySelector(".stage")?.textContent ?? "");
 check("no まっすぐ in the stage", !headlineText.includes("まっすぐ"));
@@ -79,7 +86,7 @@ check(
   lede === "Wikimedia Commons の写真を、わざと横向きや逆さまにして机に並べています。くるりAI がこのブラウザの中で1枚ずつ向きを見分けて、正しい向きに直します。",
   lede,
 );
-const runningState = await page.locator(".stat-state").textContent();
+const runningState = await page.locator(".stat-state-text").textContent();
 check("ruler names the nano model", runningState === "v2-nano で判定中", runningState ?? "");
 
 await page.evaluate(() => {
@@ -93,7 +100,11 @@ await page.waitForTimeout(100);
 check("wheel over lede reaches canvas", await page.evaluate(() => window.__wheel === true));
 
 const live = await page.evaluate(() => document.querySelector(".overlay > [aria-live]")?.textContent ?? "");
-check("live region announces progress", live === "向きを直した写真 1,284枚。正解率 92.4%。", live);
+check("live region announces progress", live === "判定して並べた写真 1,284枚。正解率 92.4%。", live);
+const fixedLabel = await page.locator(".stat[data-key='fixed'] .stat-label").textContent();
+check("ruler names turned photos differently from the headline", fixedLabel === "向きを変えた", fixedLabel ?? "");
+const releaseText = await page.locator(".nav-release").textContent();
+check("masthead release link says it is the CLI", releaseText === "CLI 版 v2.0.0", releaseText ?? "");
 
 await page.getByRole("button", { name: "一時停止" }).click();
 check("pause label follows status", await page.getByRole("button", { name: "再開" }).isVisible());
@@ -102,12 +113,12 @@ check("resume label follows status", await page.getByRole("button", { name: "一
 
 check("picker is shown with two models", await page.locator(".model-picker").isVisible());
 const nanoRadio = page.getByRole("radio", { name: /軽量 v2-nano 11.9MB/ });
-const fullRadio = page.getByRole("radio", { name: /高精度 v2.0.0 551MB/ });
+const fullRadio = page.getByRole("radio", { name: /高精度 v2.0.0 750MB/ });
 check("nano is the current model", await nanoRadio.isChecked());
 const fullDescription = await fullRadio.evaluate((input) =>
   input.getAttribute("aria-describedby").split(" ").map((id) => document.getElementById(id)?.textContent).join(" "),
 );
-check("full option describes its test accuracy", fullDescription === "未使用テスト 99.4%", fullDescription);
+check("full option describes its test accuracy", fullDescription === "正解率 99.4%（未使用テスト）", fullDescription);
 
 await fullRadio.click();
 const slip = page.locator("dialog.confirm-slip");
@@ -123,7 +134,7 @@ const slipText = await slip.evaluate((dialog) => ({
 check("confirmation title", slipText.title === "高精度モデルに切り替えますか", slipText.title ?? "");
 check(
   "confirmation body",
-  slipText.body === "約551MBのモデルを読み込みます。読み込みが終わるまで写真はばらばらの向きのまま並べておき、終わったらまとめて直します。2回目からはブラウザに保存したモデルを使います。",
+  slipText.body === "約551MBのモデルを読み込みます。準備ができると、判定に迷う写真に使う補助モデル（約199MB）も続けて読み込むので、合わせて約750MBです。読み込みが終わるまで写真はばらばらの向きのまま並べておき、終わったらまとめて直します。2回目からはブラウザに保存したモデルを使います。",
   slipText.body ?? "",
 );
 check("confirmation is a modal dialog", slipText.modal === true && slipText.name === "confirm-title");
@@ -349,7 +360,7 @@ const crooked = await headingName(page);
 check("crooked headline label", crooked.label === "向きがばらばらの写真", crooked.label);
 check("crooked headline counts crooked photos", crooked.spoken === "36枚", crooked.spoken);
 check("crooked count counts up to the crooked total", crooked.digits === "36", crooked.digits);
-const crookedState = await page.locator(".stat-state").textContent();
+const crookedState = await page.locator(".stat-state-text").textContent();
 check("nano download progress on the ruler", crookedState === "軽量モデル 4.2 / 11.9 MB", crookedState ?? "");
 const nanoNote = await page.locator(".model-option[data-model='nano'] .model-note").textContent();
 check("picker shows the loading note on the current model", nanoNote === "読み込み中 35%", nanoNote ?? "");
@@ -370,7 +381,7 @@ await page.evaluate(() => {
 const switched = await headingName(page);
 check(
   "first straightened photo resets the counter instantly",
-  switched.label === "向きを直した写真" && switched.digits === "1" && switched.spoken === "1枚",
+  switched.label === "判定して並べた写真" && switched.digits === "1" && switched.spoken === "1枚",
   JSON.stringify(switched),
 );
 const fresh = await page.evaluate(() => document.querySelector(".headline")?.classList.contains("is-fresh"));
@@ -387,7 +398,7 @@ check(
 );
 
 await open(page, "full-loading");
-const fullState = await page.locator(".stat-state").textContent();
+const fullState = await page.locator(".stat-state-text").textContent();
 check("full download progress on the ruler", fullState === "高精度モデル 231 / 551 MB", fullState ?? "");
 const fullNote = await page.locator(".model-option[data-model='full'] .model-note").textContent();
 check("full option shows its loading note", fullNote === "読み込み中 41%", fullNote ?? "");
@@ -397,15 +408,29 @@ check("crooked label while the full model loads", fullLoadingHeading.label === "
 await page.evaluate(() => {
   window.harnessOverlay.setModelProgress({ loaded: 551_055_739, total: 551_055_739, ready: false });
 });
-const preparing = await page.locator(".stat-state").textContent();
+const preparing = await page.locator(".stat-state-text").textContent();
 check("ruler says preparing after the download", preparing === "高精度モデルを準備中", preparing ?? "");
 
 await open(page, "full-running");
-const fullRunning = await page.locator(".stat-state").textContent();
+const fullRunning = await page.locator(".stat-state-text").textContent();
 check("ruler names the full model", fullRunning === "v2.0.0 で判定中", fullRunning ?? "");
-await page.getByRole("radio", { name: /軽量/ }).click();
+await page.getByRole("radio", { name: /高精度/ }).focus();
+await page.keyboard.press("ArrowLeft");
 await page.waitForTimeout(50);
-check("choosing nano on full switches at once", (await modelCalls(page)) === "nano" && (await page.locator("dialog.confirm-slip").isHidden()), await modelCalls(page));
+const backSlip = await page.locator("dialog.confirm-slip").evaluate((dialog) => ({
+  open: dialog.open,
+  title: dialog.querySelector("h2")?.textContent,
+  confirm: dialog.querySelector(".ink-fill-button")?.textContent,
+}));
+check(
+  "arrowing to nano on full asks before reloading",
+  backSlip.open && backSlip.title === "軽量モデルに切り替えますか" && backSlip.confirm === "切り替える" && (await modelCalls(page)) === "",
+  JSON.stringify(backSlip),
+);
+check("full stays checked while asking", await page.getByRole("radio", { name: /高精度/ }).isChecked());
+await page.getByRole("button", { name: "切り替える" }).click();
+await page.waitForTimeout(50);
+check("切り替える selects nano", (await modelCalls(page)) === "nano", await modelCalls(page));
 
 await open(page, "full-unavailable");
 const unavailable = page.getByRole("radio", { name: /高精度/ });
@@ -528,11 +553,23 @@ check("keyboard reaches the masthead first during the intro", firstTab === "く�
 await page.keyboard.press("Escape");
 await page.waitForTimeout(40);
 check("escape asks to skip the intro", (await page.evaluate(() => window.harnessSkipCalls.length)) === 1);
-await page.waitForTimeout(400);
-const revealStart = await page.evaluate(() => Number(getComputedStyle(document.querySelector(".intro")).opacity));
+await page.waitForTimeout(900);
+const holding = await page.evaluate(() => ({
+  text: Number(getComputedStyle(document.querySelector(".intro")).opacity),
+  actions: Number(getComputedStyle(document.querySelector(".actions")).opacity),
+  ruler: Number(getComputedStyle(document.querySelector(".ruler")).opacity),
+  inert: document.querySelector(".stage").inert,
+  insets: window.harnessOverlay.viewInsets(),
+}));
+check(
+  "text waits while the camera moves into the free area",
+  holding.text === 0 && holding.actions === 0 && holding.ruler === 0 && holding.inert && holding.insets.left > 300,
+  JSON.stringify(holding),
+);
+const revealStart = holding.text;
 const stageLayer = await page.evaluate(() => getComputedStyle(document.querySelector(".stage")).opacity);
 check("stage scrim stays under the masthead while the ui fades in", stageLayer === "1", stageLayer);
-await page.waitForTimeout(1000);
+await page.waitForTimeout(1700);
 const revealed = await page.evaluate(() => ({
   stage: Math.min(
     Number(getComputedStyle(document.querySelector(".intro")).opacity),
@@ -545,6 +582,34 @@ const revealed = await page.evaluate(() => ({
 check("ui fades back in after the intro", revealStart < 1 && revealed.stage === 1 && revealed.ruler === 1, `${revealStart} ${JSON.stringify(revealed)}`);
 check("skip button leaves with the intro", revealed.skip === true);
 check("insets return after the intro", revealed.insets.left > 300 && revealed.insets.top > 40, JSON.stringify(revealed.insets));
+const afterEscape = await page.evaluate(() => ({ text: document.activeElement?.textContent, inert: document.querySelector(".stage").inert }));
+check("escape skip leaves focus on the masthead link it was on", afterEscape.text === "くるりAI" && !afterEscape.inert, JSON.stringify(afterEscape));
+
+await open(page, "intro");
+await page.waitForTimeout(1600);
+await page.locator(".skip-intro").focus();
+await page.keyboard.press("Enter");
+await page.waitForTimeout(500);
+const keyboardSkipWait = await page.evaluate(() => document.activeElement?.tagName);
+await page.waitForTimeout(1100);
+const keyboardSkip = await page.evaluate(() => document.activeElement?.textContent);
+check("keyboard skip lands on the add button once the ui is back", keyboardSkipWait === "BODY" && keyboardSkip === "自分の写真を並べる", `${keyboardSkipWait} ${keyboardSkip}`);
+
+await open(page, "intro");
+await page.locator(".skip-intro").focus();
+await page.evaluate(() => {
+  document.querySelector(".fake-intro")?.remove();
+  window.harnessOverlay.setIntroActive(false);
+});
+await page.waitForTimeout(1300);
+const naturalEnd = await page.evaluate(() => document.activeElement?.textContent ?? document.activeElement?.tagName);
+check("focus on スキップ moves to the add button when the intro ends by itself", naturalEnd === "自分の写真を並べる", String(naturalEnd));
+const skipLook = await page.evaluate(() => {
+  const button = document.querySelector(".skip-intro");
+  const before = getComputedStyle(button, "::before");
+  return { content: before.content, background: before.backgroundColor };
+});
+check("skip label has its own dark backing", skipLook.content !== "none" && skipLook.background.startsWith("rgba(6, 14, 11"), JSON.stringify(skipLook));
 
 await open(page, "intro");
 await page.getByRole("button", { name: "スキップ" }).click();
@@ -634,6 +699,30 @@ const mobile = await browser.newContext({ viewport: { width: 390, height: 844 },
 const phone = await mobile.newPage();
 phone.on("pageerror", (error) => logs.push(`pageerror ${error.message}`));
 await open(phone, "running");
+check(
+  "mobile folds the checkbox and models behind 設定",
+  (await phone.locator(".model-picker").isHidden()) &&
+    (await phone.locator(".check").isHidden()) &&
+    (await phone.getByRole("button", { name: "設定" }).getAttribute("aria-expanded")) === "false",
+);
+const foldedInsets = await phone.evaluate(() => window.harnessOverlay.viewInsets());
+const ledgerBackground = await phone.evaluate(() => {
+  document.querySelector("[aria-controls='ledger']").click();
+  const color = getComputedStyle(document.querySelector(".ledger")).backgroundColor;
+  document.querySelector(".ledger-close").click();
+  return color;
+});
+check("mobile list hides the page behind it", ledgerBackground === "rgb(23, 58, 48)", ledgerBackground);
+await phone.getByRole("button", { name: "設定" }).tap();
+await phone.waitForTimeout(100);
+check(
+  "設定 opens the checkbox and models",
+  (await phone.locator(".model-picker").isVisible()) &&
+    (await phone.locator(".check").isVisible()) &&
+    (await phone.getByRole("button", { name: "設定" }).getAttribute("aria-expanded")) === "true",
+);
+const openInsets = await phone.evaluate(() => window.harnessOverlay.viewInsets());
+check("folded settings give the desk more room", openInsets.bottom - foldedInsets.bottom > 60, `${foldedInsets.bottom} ${openInsets.bottom}`);
 const pickerBox = await phone.locator(".model-picker").boundingBox();
 const rulerBox = await phone.locator(".ruler").boundingBox();
 check(
@@ -666,11 +755,306 @@ check(
 if (shots) {
   await phone.screenshot({ path: `${shots}/check-confirm-mobile.png` });
 }
+await phone.keyboard.press("Escape");
+await phone.waitForTimeout(5800);
+check("mobile folds the lede once straightening is under way", await phone.locator(".lede").isHidden());
 await mobile.close();
+
+await open(page, "running");
+await page.getByRole("button", { name: "一覧" }).click();
+await page.locator(".ledger-photo").first().focus();
+await page.keyboard.press("Enter");
+await page.waitForTimeout(200);
+const pinnedOverList = await page.evaluate(() => {
+  const loupe = document.querySelector(".loupe").getBoundingClientRect();
+  const ledger = document.querySelector(".ledger").getBoundingClientRect();
+  const close = document.querySelector(".slip-close").getBoundingClientRect();
+  const hit = document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2);
+  return { overlap: loupe.right > ledger.left + 1, hit: hit?.className ?? "", state: document.querySelector(".loupe").dataset.state };
+});
+check("a slip pinned from the list sits beside it, not under it", pinnedOverList.state === "pinned" && !pinnedOverList.overlap && pinnedOverList.hit === "slip-close", JSON.stringify(pinnedOverList));
+await page.keyboard.press("Escape");
+await page.setViewportSize({ width: 1280, height: 720 });
+await page.locator(".ledger-photo").nth(2).click();
+await page.waitForTimeout(200);
+const pinnedSmall = await page.evaluate(() => {
+  const close = document.querySelector(".slip-close").getBoundingClientRect();
+  return document.elementFromPoint(close.left + close.width / 2, close.top + close.height / 2)?.className ?? "";
+});
+check("the pinned slip stays reachable at 1280x720 with the list open", pinnedSmall === "slip-close", pinnedSmall);
+await page.keyboard.press("Escape");
+await page.setViewportSize({ width: 1440, height: 900 });
+
+await page.locator(".ledger-photo").first().focus();
+const heldId = await page.evaluate(() => document.activeElement?.closest("tr")?.dataset.id);
+await page.evaluate(() => {
+  const overlay = window.harnessOverlay;
+  const template = window.harnessRecords[0];
+  for (let index = 0; index < 260; index += 1) {
+    overlay.upsertRecord({ ...template, id: `held-${index}`, decidedAt: 20_000 + index });
+  }
+});
+await page.waitForTimeout(500);
+const held = await page.evaluate(() => ({
+  focus: document.activeElement?.closest("tr")?.dataset.id,
+  index: Array.from(document.querySelectorAll(".ledger tbody tr")).findIndex((row) => row.contains(document.activeElement)),
+  more: document.querySelector(".ledger-more")?.hidden === false ? document.querySelector(".ledger-more").textContent : null,
+}));
+check("rows wait while focus is in the list", held.focus === heldId && held.index === 0 && held.more === "新しい 260枚を表示", JSON.stringify(held));
+await page.getByRole("button", { name: "新しい 260枚を表示" }).click();
+await page.waitForTimeout(100);
+const shown = await page.evaluate(() => ({
+  top: document.querySelector(".ledger tbody tr")?.dataset.id,
+  focus: document.activeElement?.closest("tr")?.dataset.id,
+  rows: document.querySelectorAll(".ledger tbody tr").length,
+  more: document.querySelector(".ledger-more").hidden,
+}));
+check("showing the new rows puts focus on the newest one", shown.top === "held-259" && shown.focus === "held-259" && shown.rows === 200 && shown.more, JSON.stringify(shown));
+await page.locator(".ledger-close").click();
+
+await page.evaluate(async () => {
+  const blob = await (await fetch(new URL("../samples/sample4.webp", window.location.href))).blob();
+  const overlay = window.harnessOverlay;
+  const template = window.harnessRecords[0];
+  for (let index = 0; index < 120; index += 1) {
+    const file = new File([blob], `visitor-${index}.webp`, { type: "image/webp" });
+    overlay.upsertRecord({
+      ...template,
+      id: `visitor-${index}`,
+      decidedAt: 30_000 + index,
+      correct: null,
+      source: { ...template.source, id: `visitor-${index}`, kind: "user", title: file.name, file, thumbUrl: null, largeUrl: null, attribution: null, uprightFix: null, location: null },
+    });
+  }
+});
+await page.getByRole("button", { name: "一覧" }).click();
+await page.waitForTimeout(600);
+const lazyStart = await page.evaluate(() => Array.from(document.querySelectorAll(".ledger-thumb img")).filter((image) => image.src.startsWith("blob:")).length);
+check("list thumbnails of visitor photos load only near the view", lazyStart > 0 && lazyStart < 40, String(lazyStart));
+const thumbs = await page.evaluate(async () => {
+  const scroller = document.querySelector(".ledger-scroll");
+  for (let top = 0; top <= scroller.scrollHeight; top += 300) {
+    scroller.scrollTop = top;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  scroller.scrollTop = 0;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const images = Array.from(document.querySelectorAll(".ledger-thumb img")).filter((image) => image.src.startsWith("blob:"));
+  await Promise.all(images.map((image) => image.decode().catch(() => {})));
+  return { loaded: images.filter((image) => image.naturalWidth > 0).length, broken: images.filter((image) => image.naturalWidth === 0).length };
+});
+check("every visitor thumbnail in the list still loads", thumbs.loaded >= 120 && thumbs.broken === 0, JSON.stringify(thumbs));
+await page.locator(".ledger-close").click();
+
+await page.evaluate(() => {
+  const overlay = window.harnessOverlay;
+  const template = window.harnessRecords[0];
+  for (const [index, error] of ["HEIC 形式の写真はこのブラウザでは読み込めません", "RAW ファイルのプレビュー画像を読み取れませんでした"].entries()) {
+    const file = new File([new Uint8Array([1, 2, 3])], `broken-${index}.dng`);
+    overlay.upsertRecord({
+      ...template,
+      id: `broken-${index}`,
+      phase: "failed",
+      prediction: null,
+      correct: null,
+      slot: null,
+      error,
+      source: { ...template.source, id: `broken-${index}`, kind: "user", title: file.name, file, thumbUrl: null, largeUrl: null, attribution: null, uprightFix: null, location: null },
+    });
+  }
+});
+await page.waitForTimeout(1000);
+const failedNotice = await page.locator(".ruler-notice").textContent();
+check("failed visitor photos are reported once", failedNotice === "読み込めなかった写真が 2枚あります。理由は一覧で見られます。", failedNotice ?? "");
+await page.getByRole("button", { name: "一覧" }).click();
+const failedRow = await page.locator(".ledger tbody tr[data-id='broken-1']").evaluate((row) => ({
+  tone: row.dataset.tone,
+  text: row.textContent,
+}));
+check(
+  "failed visitor photos are listed with the reason",
+  failedRow.tone === "failed" && failedRow.text.includes("RAW ファイルのプレビュー画像を読み取れませんでした") && failedRow.text.includes("読み込めませんでした"),
+  JSON.stringify(failedRow),
+);
+await page.locator(".ledger-close").click();
+
+await open(page, "running");
+const noticeRole = await page.locator(".ruler-notice").evaluate((element) => ({
+  role: element.getAttribute("role"),
+  live: element.getAttribute("aria-live"),
+  hidden: element.hidden,
+  display: getComputedStyle(element).display,
+}));
+check("ruler notices are announced", noticeRole.role === "status" && noticeRole.live === "polite" && !noticeRole.hidden && noticeRole.display !== "none", JSON.stringify(noticeRole));
+await page.evaluate(() => {
+  window.harnessOverlay.notice("モデルを取得できませんでした（ネットワークに接続できません）。");
+  window.harnessOverlay.setStatus("model-failed");
+  window.harnessOverlay.notice("Wikimedia Commons に接続できませんでした。自分の写真は並べられます。");
+});
+const failedModel = await page.evaluate(() => ({
+  state: document.querySelector(".stat-state-text")?.textContent,
+  reload: document.querySelector(".ruler-reload")?.hidden === false,
+  pause: document.querySelector(".action-texts button")?.disabled,
+  notice: document.querySelector(".ruler-notice")?.textContent,
+}));
+check(
+  "model failure is final, keeps its message and offers a reload",
+  failedModel.state === "モデルを読み込めませんでした" &&
+    failedModel.reload &&
+    failedModel.pause === true &&
+    failedModel.notice === "モデルを取得できませんでした（ネットワークに接続できません）。",
+  JSON.stringify(failedModel),
+);
+
+await open(page, "running");
+const confirmOption = await page.evaluate(() => window.harnessOptions("running").find((option) => option.id === "full"));
+const accepted = page.evaluate((option) => window.harnessOverlay.confirmFullModel(option), confirmOption);
+await page.waitForTimeout(100);
+const bootSlip = await page.locator("dialog.confirm-slip").evaluate((dialog) => ({ open: dialog.open, title: dialog.querySelector("h2")?.textContent }));
+check("confirmFullModel opens the same confirmation", bootSlip.open && bootSlip.title === "高精度モデルに切り替えますか", JSON.stringify(bootSlip));
+await page.getByRole("button", { name: "読み込む" }).click();
+check("confirmFullModel resolves true on 読み込む", (await accepted) === true && (await modelCalls(page)) === "");
+const refused = page.evaluate((option) => window.harnessOverlay.confirmFullModel(option), confirmOption);
+await page.waitForTimeout(100);
+await page.keyboard.press("Escape");
+check("confirmFullModel resolves false on Escape", (await refused) === false);
+const dismissed = page.evaluate((option) => window.harnessOverlay.confirmFullModel(option), confirmOption);
+await page.waitForTimeout(100);
+await page.mouse.click(1300, 120);
+check("confirmFullModel resolves false on the backdrop", (await dismissed) === false);
+
+await open(page, "intro");
+const waiting = page.evaluate((option) => window.harnessOverlay.confirmFullModel(option), confirmOption);
+await page.waitForTimeout(200);
+check("confirmFullModel waits for the intro to finish", await page.locator("dialog.confirm-slip").isHidden());
+await page.evaluate(() => {
+  document.querySelector(".fake-intro")?.remove();
+  window.harnessOverlay.setIntroActive(false);
+});
+await page.waitForTimeout(1200);
+check("confirmFullModel asks once the desk is shown", await page.locator("dialog.confirm-slip").isVisible());
+await page.getByRole("button", { name: "やめる" }).click();
+check("confirmFullModel resolves false on やめる", (await waiting) === false);
+
+await open(page, "running");
+await page.evaluate(() => window.harnessOverlay.setStats(window.harnessStats(1300, 3005)));
+await page.waitForTimeout(5300);
+const quiet = await page.evaluate(() => document.querySelector(".overlay > [aria-live]")?.textContent ?? "");
+check("progress is not re-announced between milestones", quiet === "判定して並べた写真 1,284枚。正解率 92.4%。", quiet);
+await page.evaluate(() => window.harnessOverlay.setStats(window.harnessStats(1500, 3005)));
+await page.waitForTimeout(100);
+const milestone = await page.evaluate(() => document.querySelector(".overlay > [aria-live]")?.textContent ?? "");
+check("progress is announced at the next milestone", milestone.startsWith("判定して並べた写真 1,500枚。"), milestone);
+
+await page.setInputFiles('input[type="file"]', [
+  { name: "IMG_0001.HEIC", mimeType: "image/heic", buffer: Buffer.from([0, 0, 0, 24]) },
+  { name: "IMG_0002.HEIC", mimeType: "image/heic", buffer: Buffer.from([0, 0, 0, 24]) },
+]);
+await page.waitForTimeout(200);
+const heicText = await page.locator(".folder-status-text").textContent();
+check("HEIC files are not called videos", heicText === "並べられる写真がありませんでした（HEIC の写真 2枚は、このブラウザでは開けません）", heicText ?? "");
+const folderLive = await page.evaluate(() => {
+  const live = document.querySelector(".folder-status ~ [role='status'], .overlay > [role='status']");
+  const inside = document.querySelector(".folder-status [role='status']");
+  return { outside: live !== null, inside: inside !== null, text: live?.textContent ?? "" };
+});
+check("folder status speaks from a region that is always present", folderLive.outside && !folderLive.inside && folderLive.text.includes("HEIC"), JSON.stringify(folderLive));
+const cancelName = await page.locator(".folder-cancel").getAttribute("aria-label");
+check("folder cancel names what it stops", cancelName === "フォルダの読み込みをやめる", cancelName ?? "");
+
+await open(page, "about");
+const aboutText = await page.locator("dialog.about").textContent();
+check("about credits the NASA imagery", aboutText.includes("NASA Earth Observatory") && aboutText.includes("パブリックドメイン"));
+check("about states the whole full-model download", aboutText.includes("約199MB") && aboutText.includes("約750MB"));
+check("about explains the test counts", aboutText.includes("99枚×4方向") && aboutText.includes("176枚×4方向") && !aboutText.includes("条件"));
+const licenseLinks = await page.locator("dialog.about a").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+check(
+  "about links the full model's license files",
+  ["LICENSE", "THIRD_PARTY_NOTICES.md", "MODEL_CARD.md"].every((name) => licenseLinks.some((href) => href?.endsWith(`/full-local/${name}`))),
+  licenseLinks.filter((href) => href?.includes("full-local")).join(","),
+);
+
+await open(page, "running");
+const longCredit = await page.evaluate(() => {
+  const overlay = window.harnessOverlay;
+  const template = window.harnessRecords.find((item) => item.source.kind === "commons");
+  window.__longCredit = {
+    ...template,
+    id: "long-credit",
+    decidedAt: 40_000,
+    source: {
+      ...template.source,
+      id: "long-credit",
+      attribution: { ...template.source.attribution, author: "Peter Trimming from Croydon, England, edited by a second photographer", license: "CC BY 2.0" },
+    },
+  };
+  overlay.upsertRecord(window.__longCredit);
+  return template.source.attribution.licenseUrl;
+});
+await page.getByRole("button", { name: "一覧" }).click();
+const creditCell = await page.locator(".ledger tbody tr[data-id='long-credit'] .ledger-credit").evaluate((element) => {
+  const box = element.getBoundingClientRect();
+  const license = element.querySelector(".credit-license").getBoundingClientRect();
+  const lines = Math.round(box.height / parseFloat(getComputedStyle(element).lineHeight));
+  return {
+    text: element.textContent,
+    title: element.title,
+    lines,
+    licenseShown: license.top >= box.top - 1 && license.bottom <= box.bottom + 1 && license.width > 0,
+    links: Array.from(element.querySelectorAll("a")).map((link) => link.getAttribute("href")),
+  };
+});
+check(
+  "long credits keep the license visible and the full text in the title",
+  creditCell.text.startsWith("CC BY 2.0 / Peter Trimming") &&
+    creditCell.title === "Peter Trimming from Croydon, England, edited by a second photographer / CC BY 2.0" &&
+    creditCell.lines <= 2 &&
+    creditCell.licenseShown &&
+    creditCell.links.length === 2 &&
+    creditCell.links[0] === longCredit,
+  JSON.stringify(creditCell),
+);
+await page.evaluate(() => window.harnessOverlay.pin(window.__longCredit));
+await page.waitForTimeout(200);
+const pinnedCredit = await page.locator(".loupe .slip-credit").evaluate((element) => ({
+  text: element.textContent,
+  clamp: getComputedStyle(element).webkitLineClamp,
+  display: getComputedStyle(element).display,
+}));
+check(
+  "the pinned slip shows the whole credit",
+  pinnedCredit.text === "CC BY 2.0 / Peter Trimming from Croydon, England, edited by a second photographer" && pinnedCredit.display === "block",
+  JSON.stringify(pinnedCredit),
+);
+await page.keyboard.press("Escape");
+await page.locator(".ledger-close").click();
+
+await page.setViewportSize({ width: 720, height: 450 });
+await page.waitForTimeout(200);
+await page.getByRole("radio", { name: /軽量/ }).focus();
+await page.waitForTimeout(100);
+const zoomed = await page.evaluate(() => {
+  const radio = document.activeElement.getBoundingClientRect();
+  const ruler = document.querySelector(".ruler").getBoundingClientRect();
+  return {
+    scrolls: document.querySelector(".stage-scroll").hasAttribute("data-scrolls"),
+    rootScroll: document.querySelector(".desk-root").scrollTop,
+    mastheadTop: document.querySelector(".masthead").getBoundingClientRect().top,
+    radioBottom: radio.bottom,
+    rulerTop: ruler.top,
+  };
+});
+check(
+  "short screens scroll the stage instead of hiding controls under the ruler",
+  zoomed.scrolls && zoomed.rootScroll === 0 && zoomed.mastheadTop === 0 && zoomed.radioBottom <= zoomed.rulerTop,
+  JSON.stringify(zoomed),
+);
+await page.setViewportSize({ width: 1440, height: 900 });
 
 const errors = logs.filter((line) => line.startsWith("pageerror"));
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();
+reported = true;
 console.log(results.join("\n"));
 const failed = results.filter((line) => line.startsWith("FAIL")).length;
 console.log(`${results.length - failed}/${results.length} passed`);

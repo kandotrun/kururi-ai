@@ -8,7 +8,11 @@ import type {
   Quarter,
 } from "../contracts";
 import {
+  announcementKey,
+  creditParts,
   creditText,
+  failedPhotosNotice,
+  failureReason,
   folderProgressText,
   folderScanText,
   folderTruncatedText,
@@ -20,8 +24,11 @@ import {
   modelOptionText,
   modelStateText,
   modelSwitch,
+  newRowsText,
   photoPlace,
   progressAnnouncement,
+  sentenceOf,
+  switchConfirmContent,
   switchConfirmText,
   verdictOf,
   verdictText,
@@ -172,7 +179,46 @@ describe("verdictOf", () => {
       verdictOf(
         record({ prediction: null, correct: null, phase: "failed" }),
       ),
-    ).toEqual({ tone: "failed", label: "読み込めませんでした", detail: null });
+    ).toEqual({ tone: "failed", label: "答え合わせなし", detail: null });
+  });
+});
+
+describe("failureReason", () => {
+  it("gives the loader's reason for a photo that could not be read", () => {
+    expect(
+      failureReason(
+        record({
+          prediction: null,
+          correct: null,
+          phase: "failed",
+          error: "HEIC 形式の写真はこのブラウザでは読み込めません",
+        }),
+      ),
+    ).toBe("HEIC 形式の写真はこのブラウザでは読み込めません");
+  });
+
+  it("falls back to a plain sentence when no reason was kept", () => {
+    expect(
+      failureReason(
+        record({ prediction: null, correct: null, phase: "failed", error: null }),
+      ),
+    ).toBe("写真を読み込めませんでした");
+  });
+
+  it("is empty for photos that did not fail", () => {
+    expect(failureReason(record())).toBeNull();
+    expect(failureReason(record({ error: "stale" }))).toBeNull();
+  });
+});
+
+describe("failedPhotosNotice", () => {
+  it("counts the visitor's photos that could not be read", () => {
+    expect(failedPhotosNotice(1)).toBe(
+      "読み込めなかった写真が 1枚あります。理由は一覧で見られます。",
+    );
+    expect(failedPhotosNotice(1200)).toBe(
+      "読み込めなかった写真が 1,200枚あります。理由は一覧で見られます。",
+    );
   });
 });
 
@@ -205,6 +251,50 @@ describe("creditText", () => {
     expect(creditText(source({ kind: "user", attribution: null }))).toBe(
       "あなたの写真",
     );
+  });
+});
+
+describe("creditParts", () => {
+  it("puts the license first so a long author name never hides it", () => {
+    expect(creditParts(source())).toEqual({
+      license: "CC BY-SA 4.0",
+      author: "Diliff",
+      full: "Diliff / CC BY-SA 4.0",
+    });
+  });
+
+  it("keeps the whole author for the full credit", () => {
+    const author = "A".repeat(765);
+    expect(
+      creditParts(
+        source({
+          attribution: {
+            author,
+            license: "CC BY 2.0",
+            licenseUrl: null,
+            pageUrl: "https://commons.wikimedia.org/wiki/File:B.jpg",
+          },
+        }),
+      ),
+    ).toEqual({ license: "CC BY 2.0", author, full: `${author} / CC BY 2.0` });
+  });
+
+  it("has no license for samples, visitors' photos and missing attribution", () => {
+    expect(creditParts(source({ kind: "sample", attribution: null }))).toEqual({
+      license: null,
+      author: "サンプル写真",
+      full: "サンプル写真",
+    });
+    expect(creditParts(source({ kind: "user", attribution: null }))).toEqual({
+      license: null,
+      author: "あなたの写真",
+      full: "あなたの写真",
+    });
+    expect(creditParts(source({ attribution: null }))).toEqual({
+      license: null,
+      author: "Wikimedia Commons",
+      full: "Wikimedia Commons",
+    });
   });
 });
 
@@ -252,13 +342,13 @@ describe("headlineState", () => {
     });
   });
 
-  it("switches to the straightened count once one lands", () => {
+  it("counts every placed photo once one lands, without claiming each was fixed", () => {
     expect(headlineState(stats({ placed: 1, crooked: 40 }), "running")).toEqual({
-      label: "向きを直した写真",
+      label: "判定して並べた写真",
       value: 1,
     });
     expect(headlineState(stats({ placed: 1284 }), "paused")).toEqual({
-      label: "向きを直した写真",
+      label: "判定して並べた写真",
       value: 1284,
     });
   });
@@ -276,22 +366,59 @@ describe("progressAnnouncement", () => {
     expect(progressAnnouncement(stats({ placed: 0 }), "running")).toBe("");
   });
 
-  it("reports the straightened count and accuracy", () => {
+  it("reports the placed count and accuracy", () => {
     expect(progressAnnouncement(stats(), "running")).toBe(
-      "向きを直した写真 1,284枚。正解率 92.7%。",
+      "判定して並べた写真 1,284枚。正解率 92.7%。",
     );
   });
 
   it("omits accuracy when nothing could be graded", () => {
     expect(
       progressAnnouncement(stats({ placed: 3, accuracy: null }), "running"),
-    ).toBe("向きを直した写真 3枚。");
+    ).toBe("判定して並べた写真 3枚。");
+  });
+
+  it("says the desk is paused", () => {
+    expect(progressAnnouncement(stats(), "paused")).toBe(
+      "一時停止中。判定して並べた写真 1,284枚。正解率 92.7%。",
+    );
   });
 
   it("uses the finished label at the end", () => {
     expect(
       progressAnnouncement(stats({ placed: 3005 }), "finished"),
     ).toBe("並べ終えた写真 3,005枚。正解率 92.7%。");
+  });
+});
+
+describe("announcementKey", () => {
+  it("stays silent before anything is placed", () => {
+    expect(announcementKey(stats({ placed: 0 }), "running")).toBeNull();
+    expect(announcementKey(stats({ placed: 0 }), "model-failed")).toBeNull();
+  });
+
+  it("speaks once when the first photo is placed", () => {
+    const first = announcementKey(stats({ placed: 1 }), "running");
+    expect(first).not.toBeNull();
+    expect(announcementKey(stats({ placed: 2 }), "running")).toBe(first);
+    expect(announcementKey(stats({ placed: 499 }), "running")).toBe(first);
+  });
+
+  it("speaks again every 500 photos", () => {
+    const early = announcementKey(stats({ placed: 499 }), "running");
+    const next = announcementKey(stats({ placed: 500 }), "running");
+    expect(next).not.toBe(early);
+    expect(announcementKey(stats({ placed: 999 }), "running")).toBe(next);
+    expect(announcementKey(stats({ placed: 1000 }), "running")).not.toBe(next);
+  });
+
+  it("speaks when the desk pauses, resumes or finishes", () => {
+    const running = announcementKey(stats({ placed: 120 }), "running");
+    const paused = announcementKey(stats({ placed: 120 }), "paused");
+    const finished = announcementKey(stats({ placed: 120 }), "finished");
+    expect(paused).not.toBe(running);
+    expect(finished).not.toBe(running);
+    expect(finished).not.toBe(paused);
   });
 });
 
@@ -377,6 +504,19 @@ describe("modelStateText", () => {
     expect(modelStateText("paused", ready, NANO)).toBe("一時停止中");
     expect(modelStateText("finished", ready, FULL)).toBe("並べ終えました");
   });
+
+  it("says plainly when the model could not be loaded", () => {
+    expect(
+      modelStateText(
+        "model-failed",
+        { loaded: 4_200_000, total: 11_908_441, ready: false },
+        NANO,
+      ),
+    ).toBe("モデルを読み込めませんでした");
+    expect(
+      modelStateText("model-failed", { loaded: 1, total: 1, ready: true }, FULL),
+    ).toBe("モデルを読み込めませんでした");
+  });
 });
 
 describe("headlineChange", () => {
@@ -388,11 +528,11 @@ describe("headlineChange", () => {
 
   it("jumps when the label changes instead of counting down", () => {
     expect(
-      headlineChange(crooked, { label: "向きを直した写真", value: 1 }),
+      headlineChange(crooked, { label: "判定して並べた写真", value: 1 }),
     ).toBe("jump");
     expect(
       headlineChange(
-        { label: "向きを直した写真", value: 3005 },
+        { label: "判定して並べた写真", value: 3005 },
         { label: "並べ終えた写真", value: 3005 },
       ),
     ).toBe("jump");
@@ -408,16 +548,16 @@ describe("headlineChange", () => {
 });
 
 describe("modelOptionText", () => {
-  it("names each model with its version and download size", () => {
+  it("names each model with its version, its whole download and its test accuracy", () => {
     expect(modelOptionText(NANO)).toEqual({
       label: "軽量",
       detail: "v2-nano 11.9MB",
-      meta: "未使用テスト 81.8%",
+      meta: "正解率 81.8%（未使用テスト）",
     });
     expect(modelOptionText(FULL)).toEqual({
       label: "高精度",
-      detail: "v2.0.0 551MB",
-      meta: "未使用テスト 99.4%",
+      detail: "v2.0.0 750MB",
+      meta: "正解率 99.4%（未使用テスト）",
     });
   });
 });
@@ -427,8 +567,8 @@ describe("modelSwitch", () => {
     expect(modelSwitch("nano", FULL)).toBe("confirm");
   });
 
-  it("switches back to the light model at once", () => {
-    expect(modelSwitch("full", NANO)).toBe("switch");
+  it("also asks before going back to the light model, because the page reloads", () => {
+    expect(modelSwitch("full", NANO)).toBe("confirm");
   });
 
   it("ignores the current model and unavailable models", () => {
@@ -445,10 +585,36 @@ describe("modelSwitch", () => {
 });
 
 describe("switchConfirmText", () => {
-  it("states the download size taken from the option", () => {
+  it("states the main download and the helper model fetched right after it", () => {
     expect(switchConfirmText(FULL)).toBe(
-      "約551MBのモデルを読み込みます。読み込みが終わるまで写真はばらばらの向きのまま並べておき、終わったらまとめて直します。2回目からはブラウザに保存したモデルを使います。",
+      "約551MBのモデルを読み込みます。準備ができると、判定に迷う写真に使う補助モデル（約199MB）も続けて読み込むので、合わせて約750MBです。読み込みが終わるまで写真はばらばらの向きのまま並べておき、終わったらまとめて直します。2回目からはブラウザに保存したモデルを使います。",
     );
+  });
+
+  it("states the light model's size", () => {
+    expect(switchConfirmText(NANO)).toBe("約11.9MBの軽量モデルで判定します。");
+  });
+});
+
+describe("switchConfirmContent", () => {
+  it("asks to load the full model", () => {
+    expect(switchConfirmContent(FULL)).toEqual({
+      title: "高精度モデルに切り替えますか",
+      body: switchConfirmText(FULL),
+      note: "切り替えるとページを開き直し、最初から並べ直します。並べていた自分の写真は、もう一度選んでください。",
+      confirmLabel: "読み込む",
+      cancelLabel: "やめる",
+    });
+  });
+
+  it("asks to go back to the light model", () => {
+    expect(switchConfirmContent(NANO)).toEqual({
+      title: "軽量モデルに切り替えますか",
+      body: "約11.9MBの軽量モデルで判定します。",
+      note: "切り替えるとページを開き直し、最初から並べ直します。並べていた自分の写真は、もう一度選んでください。",
+      confirmLabel: "切り替える",
+      cancelLabel: "やめる",
+    });
   });
 });
 
@@ -547,6 +713,28 @@ describe("folderProgressText", () => {
       folderProgressText({ found: 4000, accepted: 2512, skipped: 1488, done: false }),
     ).toBe("2,512枚を並べます（動画など 1,488件は対象外）");
   });
+
+  it("says HEIC photos are photos this browser cannot open, not videos", () => {
+    expect(
+      folderProgressText({ found: 2, accepted: 0, skipped: 2, done: true }, 2),
+    ).toBe("並べられる写真がありませんでした（HEIC の写真 2枚は、このブラウザでは開けません）");
+    expect(
+      folderProgressText({ found: 1159, accepted: 740, skipped: 419, done: false }, 43),
+    ).toBe("740枚を並べます（HEIC の写真 43枚は、このブラウザでは開けません。動画など 376件は対象外）");
+  });
+
+  it("never counts more HEIC files than were left out", () => {
+    expect(
+      folderProgressText({ found: 12, accepted: 12, skipped: 0, done: false }, 3),
+    ).toBe("12枚を並べます");
+  });
+});
+
+describe("newRowsText", () => {
+  it("offers the rows held back while the visitor reads the list", () => {
+    expect(newRowsText(1)).toBe("新しい 1枚を表示");
+    expect(newRowsText(1234)).toBe("新しい 1,234枚を表示");
+  });
 });
 
 describe("folderTruncatedText", () => {
@@ -554,5 +742,19 @@ describe("folderTruncatedText", () => {
     expect(folderTruncatedText(20000)).toBe(
       "フォルダの中のファイルが多いため、最初の 20,000件だけ読み込みました。",
     );
+  });
+});
+
+describe("sentenceOf", () => {
+  it("ends a reason with a full stop", () => {
+    expect(sentenceOf("このブラウザは WebGPU に対応していないため使えません")).toBe(
+      "このブラウザは WebGPU に対応していないため使えません。",
+    );
+  });
+
+  it("keeps text that already ends a sentence", () => {
+    expect(sentenceOf("使えません。")).toBe("使えません。");
+    expect(sentenceOf("使えません！")).toBe("使えません！");
+    expect(sentenceOf("  使えません  ")).toBe("使えません。");
   });
 });

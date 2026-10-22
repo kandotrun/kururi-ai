@@ -4,6 +4,8 @@ import {
   INTRO_DURATION_MS,
   INTRO_SECONDS,
   PHASE_STARTS,
+  PORTAL,
+  ROOM_IN,
   type StageMix,
   createStageMix,
   phaseAt,
@@ -71,16 +73,41 @@ describe("stageMix", () => {
     }
   });
 
-  it("hides every stage switch inside clouds or window light", () => {
+  it("hides the globe to city switch inside the clouds", () => {
     for (let time = 0; time <= 10; time += 0.005) {
       const mix = sample(time);
       if (mix.globe > 0.001 && mix.city > 0.001) {
         expect(mix.clouds).toBeGreaterThan(0.85);
       }
+    }
+  });
+
+  it("switches to the room only while the window portal is fully open", () => {
+    for (let time = 0; time <= 10; time += 0.005) {
+      const mix = sample(time);
       if (mix.city > 0.001 && mix.room > 0.001) {
-        expect(mix.glow).toBeGreaterThan(0.85);
+        expect(time).toBeGreaterThanOrEqual(ROOM_IN[0]);
+        expect(time).toBeLessThanOrEqual(ROOM_IN[1]);
+        expect(mix.portal + mix.room).toBeCloseTo(1, 9);
+      }
+      if (mix.city <= 0.001) {
+        expect(mix.portal).toBeLessThanOrEqual(0.001);
       }
     }
+    expect(sample(PORTAL[0] - 0.01).portal).toBe(0);
+    expect(sample(PORTAL[1]).portal).toBe(1);
+    expect(PORTAL[1]).toBeLessThan(ROOM_IN[0]);
+  });
+
+  it("keeps the window light gentle and never over-exposes the room", () => {
+    let peak = 0;
+    for (let time = 0; time <= 10; time += 0.005) {
+      const mix = sample(time);
+      peak = Math.max(peak, mix.glow);
+      expect(mix.exposure).toBeLessThanOrEqual(1);
+    }
+    expect(peak).toBeGreaterThan(0.1);
+    expect(peak).toBeLessThanOrEqual(0.6);
   });
 
   it("fades the canvas out during the hand-off only", () => {

@@ -37,7 +37,7 @@ export interface StreamDeps {
   wait: (ms: number) => Promise<void>;
   simulateUser: () => boolean;
   reducedMotion: () => boolean;
-  limits: StreamLimits;
+  limits: () => StreamLimits;
   onStatus: (status: StreamStatus) => void;
   onNotice: (message: string | null) => void;
 }
@@ -47,6 +47,8 @@ export const OFFLINE_NOTICE =
 export function deskFullNotice(leftOut: number): string {
   return `机がいっぱいなので、${leftOut.toLocaleString("ja-JP")}枚は並べられませんでした。`;
 }
+export const WORKERS_STOPPED_NOTICE =
+  "推論ワーカーが止まったため、ここから先の写真は判定できません。ページを再読み込みしてください。";
 
 const OFFLINE_AFTER_FAILURES = 8;
 const OFFLINE_PROBE_MS = 5_000;
@@ -58,6 +60,7 @@ const FOCUS_DROP_LIMIT = 3;
 const MIN_RATE_PAUSE_MS = 1_000;
 const MAX_RATE_PAUSE_MS = 60_000;
 const NO_SLOT = "並べる場所が決まりませんでした";
+const WORKERS_STOPPED = "推論ワーカーが停止したため判定できませんでした";
 
 type OpeningPhase = "gathering" | "holding" | "released";
 
@@ -86,10 +89,11 @@ function isUser(source: PhotoSource): boolean {
 
 export function createStream(deps: StreamDeps): Stream {
   const { limits, store, scene, pool } = deps;
-  const reserve = Math.min(USER_RESERVE, Math.floor(limits.maxPrints / 10));
+  const desk = limits().maxPrints;
+  const reserve = Math.min(USER_RESERVE, Math.floor(desk / 10));
   const remaining = deps.sources.slice(
     0,
-    Math.max(0, Math.min(deps.sources.length, limits.maxPrints - reserve)),
+    Math.max(0, Math.min(deps.sources.length, desk - reserve)),
   );
   let plannedSources = remaining.length;
   const takenIds = new Set(deps.sources.map((source) => source.id));
@@ -103,6 +107,7 @@ export function createStream(deps: StreamDeps): Stream {
   let started = false;
   let paused = false;
   let disposed = false;
+  let stopped = false;
   let poolReady = false;
   let opening: OpeningPhase = "gathering";
   let landedCount = 0;
@@ -174,13 +179,15 @@ export function createStream(deps: StreamDeps): Stream {
   }
 
   function refreshStatus(): void {
-    const next: StreamStatus = paused
-      ? "paused"
-      : finished()
-        ? "finished"
-        : offline
-          ? "offline"
-          : "running";
+    const next: StreamStatus = stopped
+      ? "model-failed"
+      : paused
+        ? "paused"
+        : finished()
+          ? "finished"
+          : offline
+            ? "offline"
+            : "running";
     if (next !== status) {
       status = next;
       deps.onStatus(next);
@@ -313,20 +320,19 @@ export function createStream(deps: StreamDeps): Stream {
     if (opening !== "gathering" || !poolReady) {
       return;
     }
-    if (landedCount < limits.openingBatch && !starved()) {
+    if (landedCount < limits().openingBatch && !starved()) {
       return;
     }
     opening = "holding";
-    void deps.wait(limits.openingHoldMs).then(() => {
+    void deps.wait(limits().openingHoldMs).then(() => {
       opening = "released";
       pump();
     });
   }
 
   function pileLimit(): number {
-    return opening === "released"
-      ? limits.maxPile
-      : Math.max(limits.maxPile, limits.openingBatch);
+    const { maxPile, openingBatch } = limits();
+    return opening === "released" ? maxPile : Math.max(maxPile, openingBatch);
   }
 
   function releaseFocus(id: string): void {
@@ -355,6 +361,44 @@ export function createStream(deps: StreamDeps): Stream {
     fail(source, error);
   }
 
+  function workersStopped(): boolean {
+    return poolReady && pool.size === 0;
+  }
+
+  function stop(): void {
+    stopped = true;
+    deps.onNotice(WORKERS_STOPPED_NOTICE);
+    const error = new Error(WORKERS_STOPPED);
+    for (const controller of controllers) {
+      controller.abort();
+    }
+    for (const entry of waiting.splice(0)) {
+      failPrint(entry.source, error);
+    }
+    for (const entry of retryQueue.splice(0)) {
+      fail(entry.source, error);
+    }
+    for (const entry of userQueue.splice(0)) {
+      active += 1;
+      store.dispatch({
+        type: "added",
+        source: entry.source,
+        simulated: entry.simulated,
+        at: deps.now(),
+      });
+      fail(entry.source, error);
+    }
+    plannedSources -= remaining.length;
+    remaining.length = 0;
+    store.dispatch({ type: "totalChanged", total: total() });
+  }
+
+  function noticeStoppedWorkers(): void {
+    if (!stopped && workersStopped()) {
+      stop();
+    }
+  }
+
   async function runLoad(entry: Pending): Promise<void> {
     const { source, simulated, focus } = entry;
     const controller = new AbortController();
@@ -368,6 +412,10 @@ export function createStream(deps: StreamDeps): Stream {
         return;
       }
       stopLoading(source);
+      if (stopped) {
+        fail(source, new Error(WORKERS_STOPPED));
+        return;
+      }
       if (error instanceof RateLimitedError && source.kind === "commons") {
         requeue(entry);
         pauseCommons(error.retryAfterMs);
@@ -384,6 +432,11 @@ export function createStream(deps: StreamDeps): Stream {
       return;
     }
     stopLoading(source);
+    if (stopped) {
+      image.bitmap.close();
+      fail(source, new Error(WORKERS_STOPPED));
+      return;
+    }
     noteCommons(source, true);
     store.dispatch({ type: "loaded", id: source.id, aspect: image.aspect });
     const slot = store.getState().records.get(source.id)?.slot ?? null;
@@ -415,6 +468,10 @@ export function createStream(deps: StreamDeps): Stream {
       return;
     }
     landing -= 1;
+    if (stopped) {
+      failPrint(source, new Error(WORKERS_STOPPED));
+      return;
+    }
     landedCount += 1;
     store.dispatch({ type: "landed", id: source.id });
     if (focus) {
@@ -489,7 +546,7 @@ export function createStream(deps: StreamDeps): Stream {
   }
 
   function startScans(): void {
-    if (opening !== "released") {
+    if (opening !== "released" || stopped) {
       return;
     }
     while (waiting.length > 0 && scanning < pool.size && pool.idleCount() > 0) {
@@ -501,7 +558,8 @@ export function createStream(deps: StreamDeps): Stream {
 
   function startLoads(): void {
     while (
-      loading < limits.maxLoading &&
+      !stopped &&
+      loading < limits().maxLoading &&
       loading + landing + waiting.length < pileLimit()
     ) {
       const next = nextPending();
@@ -527,6 +585,7 @@ export function createStream(deps: StreamDeps): Stream {
   }
 
   function step(): void {
+    noticeStoppedWorkers();
     if (!paused) {
       updateOpening();
       startScans();
@@ -601,12 +660,20 @@ export function createStream(deps: StreamDeps): Stream {
       pump();
     },
     addUserFiles(files) {
-      if (disposed || files.length === 0) {
-        return;
+      if (disposed) {
+        return files.slice();
+      }
+      if (files.length === 0) {
+        return [];
+      }
+      noticeStoppedWorkers();
+      if (stopped) {
+        pump();
+        return files.slice();
       }
       const free = Math.max(
         0,
-        limits.maxPrints - plannedSources - userAccepted,
+        limits().maxPrints - plannedSources - userAccepted,
       );
       const dropped =
         files.length > free ? dropUnstartedCommons(files.length - free) : 0;
@@ -629,6 +696,7 @@ export function createStream(deps: StreamDeps): Stream {
         store.dispatch({ type: "totalChanged", total: total() });
       }
       pump();
+      return files.slice(accepted.length);
     },
     dispose() {
       if (disposed) {

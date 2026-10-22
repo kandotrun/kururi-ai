@@ -4,6 +4,7 @@ import "../style.css";
 import type {
   DeskStats,
   ModelId,
+  ModelOption,
   ModelProgress,
   Overlay,
   OverlayHandlers,
@@ -20,6 +21,8 @@ import { createConfirmSlip } from "./confirm-slip";
 import {
   type HeadlineState,
   type ModelName,
+  announcementKey,
+  failedPhotosNotice,
   headlineChange,
   headlineState,
   modelLoadingNote,
@@ -34,6 +37,7 @@ import { entryAccess } from "./folder-entries";
 import { createFolderImport } from "./folder-import";
 import { createFolderStatus } from "./folder-status";
 import { formatCount } from "./format";
+import { createHeicTracker } from "./heic-tracker";
 import { createInsetTracker } from "./inset-tracker";
 import { createLedger } from "./ledger";
 import { GITHUB_URL, RELEASE_URL } from "./links";
@@ -43,16 +47,21 @@ import { createRuler } from "./ruler";
 
 const LEDGER_LIMIT = 200;
 const VISITOR_PREVIEW_SIDE = 960;
-const VISITOR_IMAGE_LIMIT = 64;
+const VISITOR_IMAGE_IDLE = 48;
 const ANNOUNCE_INTERVAL_MS = 5000;
 const LOCAL_NOTICE_MS = 4500;
+const FAILED_NOTICE_MS = 9000;
+const FAILED_GATHER_MS = 800;
+const REVEAL_DELAY_MS = 1000;
+const REVEAL_FADE_MS = 760;
+const LEDE_FOLD_DELAY_MS = 6000;
 
 const LEDE_PHRASES = [
-  "Wikimedia Commons\u00a0の写真を、",
+  "Wikimedia Commons の写真を、",
   "わざと横向きや",
   "逆さまにして",
   "机に並べています。",
-  "くるりAI\u00a0が",
+  "くるりAI が",
   "このブラウザの中で",
   "1枚ずつ",
   "向きを見分けて、",
@@ -93,7 +102,7 @@ const visitorImages = createVisitorImages({
   preview: (file) => visitorPreviewBlob(file, VISITOR_PREVIEW_SIDE),
   createUrl: (blob) => URL.createObjectURL(blob),
   revokeUrl: (url) => URL.revokeObjectURL(url),
-  limit: VISITOR_IMAGE_LIMIT,
+  idleLimit: VISITOR_IMAGE_IDLE,
 });
 
 export function mountOverlay(
@@ -104,18 +113,28 @@ export function mountOverlay(
   const sheet = mediaQuery("(max-width: 719px)");
   const records = new Map<string, PhotoRecord>();
   const log = createDecisionLog();
+  const heic = createHeicTracker();
 
   let status: StreamStatus = "loading-model";
   let progress: ModelProgress = { loaded: 0, total: 0, ready: false };
   let stats: DeskStats | null = null;
   let mainNotice: string | null = null;
+  let failureNotice: string | null = null;
   let localNotice: string | null = null;
   let localTimer = 0;
   let webgl = true;
   let shownHeadline: HeadlineState | null = null;
   let modelName: ModelName = DEFAULT_MODEL;
   let introActive = false;
+  let revealing = false;
+  let revealTimer = 0;
+  let revealEndTimer = 0;
   let skipWithKeyboard = false;
+  let spokenKey: string | null = null;
+  let failedWaiting = 0;
+  let failedTimer = 0;
+  let ledeTimer = 0;
+  let pendingConfirm: (() => void) | null = null;
 
   const canvas = h("canvas", {
     class: "desk-canvas",
@@ -128,7 +147,7 @@ export function mountOverlay(
     { type: "button", class: "text-button", "aria-haspopup": "dialog" },
     ["このデモについて"],
   );
-  const releaseLink = externalLink(RELEASE_URL, "v2.0.0 をダウンロード");
+  const releaseLink = externalLink(RELEASE_URL, "CLI 版 v2.0.0");
   releaseLink.classList.add("nav-release");
   const masthead = h("header", { class: "masthead" }, [
     h("a", { class: "wordmark", href: "./" }, ["くるりAI"]),
@@ -171,6 +190,16 @@ export function mountOverlay(
     },
     ["フォルダを選ぶ"],
   );
+  const settingsButton = h(
+    "button",
+    {
+      type: "button",
+      class: "text-button settings-toggle",
+      "aria-expanded": "false",
+      "aria-controls": "desk-check desk-models",
+    },
+    ["設定"],
+  );
   const pauseButton = h("button", { type: "button", class: "text-button" }, [
     "一時停止",
   ]);
@@ -190,7 +219,7 @@ export function mountOverlay(
     ["一覧"],
   );
   const simulateInput = h("input", { type: "checkbox" });
-  const ruler = createRuler();
+  const ruler = createRuler({ onReload: () => window.location.reload() });
   const confirmSlip = createConfirmSlip({
     sheet,
     reserveBottom: () => ruler.element.offsetHeight,
@@ -199,26 +228,39 @@ export function mountOverlay(
     confirm: confirmSlip,
     onSelect: (id: ModelId) => handlers.selectModel(id),
   });
+  picker.element.id = "desk-models";
   const folderImport = createFolderImport({
     access: entryAccess,
     countsAsPhoto,
     mayBePhoto,
-    onFiles: (files) => handlers.addFiles(files),
+    onFiles: (files) => {
+      heic.handOff({
+        found: files.length,
+        photos: files.filter(countsAsPhoto).length,
+        photosWithHeic: files.filter(mayBePhoto).length,
+      });
+      handlers.addFiles(files);
+    },
     onScan: (photos) => folderStatus.scanning(photos),
     onNotice: (message, kind) => {
       if (kind === "empty") {
         folderStatus.empty(message);
       } else {
-        flashNotice(message);
+        flashNotice(message, LOCAL_NOTICE_MS);
       }
     },
   });
   const folderStatus = createFolderStatus({
     onCancel: () => folderImport.cancel(),
+    heicLeftOut: (report) => heic.leftOut(report),
   });
   const actions = h("div", { class: "actions" }, [
-    h("div", { class: "action-row action-add" }, [addButton, folderButton]),
-    h("label", { class: "check" }, [
+    h("div", { class: "action-row action-add" }, [
+      addButton,
+      folderButton,
+      settingsButton,
+    ]),
+    h("label", { class: "check", id: "desk-check" }, [
       simulateInput,
       h("span", {}, ["自分の写真もわざと回転させる"]),
     ]),
@@ -251,7 +293,7 @@ export function mountOverlay(
       {},
       phrased([
         "このブラウザでは ",
-        "3D\u00a0の机を",
+        "3D の机を",
         "表示できませんでした。",
         "写真の判定は",
         "このまま続くので、",
@@ -263,7 +305,11 @@ export function mountOverlay(
   ]);
 
   const headlineBlock = h("div", { class: "intro" }, [headline, lede]);
-  const stage = h("main", { class: "stage" }, [headlineBlock, actions]);
+  const stageScroll = h("div", { class: "stage-scroll" }, [
+    headlineBlock,
+    actions,
+  ]);
+  const stage = h("main", { class: "stage" }, [stageScroll]);
 
   const counter = createCounter(digits, reducedMotion);
 
@@ -274,6 +320,7 @@ export function mountOverlay(
     const restore = ledger.element.contains(document.activeElement);
     ledger.close();
     listButton.setAttribute("aria-expanded", "false");
+    loupe.reposition();
     if (restore) {
       listButton.focus({ preventScroll: true });
     }
@@ -282,6 +329,7 @@ export function mountOverlay(
   function openLedger(): void {
     ledger.open();
     listButton.setAttribute("aria-expanded", "true");
+    loupe.reposition();
   }
 
   const ledger = createLedger({
@@ -298,26 +346,50 @@ export function mountOverlay(
     handlers.selectRecord(null);
   }
 
+  function ledgerReserve(): number {
+    if (!ledger.isOpen || sheet()) {
+      return 0;
+    }
+    const left = ledger.element.getBoundingClientRect().left;
+    return left > 0 ? Math.max(0, window.innerWidth - left) : 0;
+  }
+
   const loupe = createLoupe({
     images: visitorImages,
     onClose: closePin,
     sheet,
     reserveTop: () => masthead.offsetHeight,
     reserveBottom: () => ruler.element.offsetHeight,
+    reserveRight: ledgerReserve,
   });
 
   function renderNotice(): void {
-    ruler.setNotice(localNotice ?? mainNotice);
+    ruler.setNotice(failureNotice ?? localNotice ?? mainNotice);
   }
 
-  function flashNotice(message: string): void {
+  function flashNotice(message: string, duration: number): void {
     localNotice = message;
     renderNotice();
     window.clearTimeout(localTimer);
     localTimer = window.setTimeout(() => {
       localNotice = null;
       renderNotice();
-    }, LOCAL_NOTICE_MS);
+    }, duration);
+  }
+
+  function noteFailedPhoto(): void {
+    failedWaiting += 1;
+    if (failedTimer !== 0) {
+      return;
+    }
+    failedTimer = window.setTimeout(() => {
+      failedTimer = 0;
+      const failed = failedWaiting;
+      failedWaiting = 0;
+      if (failed > 0) {
+        flashNotice(failedPhotosNotice(failed), FAILED_NOTICE_MS);
+      }
+    }, FAILED_GATHER_MS);
   }
 
   const drop = createDropZone(window, {
@@ -344,6 +416,7 @@ export function mountOverlay(
       skipButton,
       drop.element,
       announcer.element,
+      folderStatus.live,
     ],
   );
   const about = createAbout();
@@ -366,8 +439,16 @@ export function mountOverlay(
     fileInput.click();
   }
 
+  function setSettingsOpen(open: boolean): void {
+    settingsButton.setAttribute("aria-expanded", String(open));
+    actions.toggleAttribute("data-settings-open", open);
+  }
+
   addButton.addEventListener("click", () => openPicker(false));
   folderButton.addEventListener("click", () => openPicker(true));
+  settingsButton.addEventListener("click", () =>
+    setSettingsOpen(settingsButton.getAttribute("aria-expanded") !== "true"),
+  );
   fileInput.addEventListener("change", () => {
     const files = Array.from(fileInput.files ?? []);
     const origin = fileInput.webkitdirectory ? "folder" : "files";
@@ -403,6 +484,7 @@ export function mountOverlay(
     if (introActive) {
       if (!skipButton.disabled) {
         event.preventDefault();
+        skipWithKeyboard = true;
         skipButton.disabled = true;
         handlers.skipIntro();
       }
@@ -424,10 +506,20 @@ export function mountOverlay(
     overlay.style.setProperty("--ruler-h", `${ruler.element.offsetHeight}px`);
     overlay.style.setProperty("--mast-h", `${masthead.offsetHeight}px`);
   }
+  function syncStageScroll(): void {
+    stageScroll.toggleAttribute(
+      "data-scrolls",
+      stageScroll.scrollHeight > stageScroll.clientHeight + 1,
+    );
+  }
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(syncChromeSizes);
     observer.observe(ruler.element);
     observer.observe(masthead);
+    const stageObserver = new ResizeObserver(syncStageScroll);
+    stageObserver.observe(stage);
+    stageObserver.observe(headlineBlock);
+    stageObserver.observe(actions);
   }
   syncChromeSizes();
   window.addEventListener("resize", () => loupe.reposition());
@@ -448,32 +540,71 @@ export function mountOverlay(
     },
     sheet,
   );
+  stageScroll.addEventListener("scroll", () => insets.refresh(), {
+    passive: true,
+  });
+
+  function bodyHasFocus(): boolean {
+    const active = document.activeElement;
+    return active === null || active === document.body;
+  }
+
+  function finishReveal(refocus: boolean): void {
+    revealTimer = 0;
+    stage.inert = false;
+    ruler.element.inert = false;
+    ruler.repeatNotice();
+    if (refocus && bodyHasFocus()) {
+      addButton.focus({ preventScroll: true });
+    }
+    const confirm = pendingConfirm;
+    pendingConfirm = null;
+    confirm?.();
+    revealEndTimer = window.setTimeout(() => {
+      revealEndTimer = 0;
+      revealing = false;
+      overlay.removeAttribute("data-revealing");
+    }, REVEAL_FADE_MS);
+  }
 
   function setIntroActive(active: boolean): void {
     if (active === introActive) {
       return;
     }
     introActive = active;
-    overlay.toggleAttribute("data-intro", active);
-    stage.inert = active;
-    ruler.element.inert = active;
-    skipButton.hidden = !active;
-    skipButton.disabled = false;
+    window.clearTimeout(revealTimer);
+    window.clearTimeout(revealEndTimer);
+    revealTimer = 0;
+    revealEndTimer = 0;
     if (active) {
+      revealing = false;
+      overlay.removeAttribute("data-revealing");
+      overlay.setAttribute("data-intro", "");
+      stage.inert = true;
+      ruler.element.inert = true;
+      skipButton.hidden = false;
+      skipButton.disabled = false;
       loupe.pin(null);
       loupe.hide();
       closeLedger();
-    } else {
-      const refocus =
-        skipWithKeyboard &&
-        (document.activeElement === skipButton ||
-          document.activeElement === document.body);
-      skipWithKeyboard = false;
-      if (refocus) {
-        addButton.focus({ preventScroll: true });
-      }
+      insets.setSuspended(true);
+      return;
     }
-    insets.setSuspended(active);
+    const refocus =
+      skipWithKeyboard || document.activeElement === skipButton;
+    skipWithKeyboard = false;
+    const delay = reducedMotion() ? 0 : REVEAL_DELAY_MS;
+    revealing = delay > 0;
+    overlay.toggleAttribute("data-revealing", revealing);
+    overlay.removeAttribute("data-intro");
+    skipButton.hidden = true;
+    skipButton.disabled = false;
+    insets.setSuspended(false);
+    if (revealing) {
+      revealTimer = window.setTimeout(() => finishReveal(refocus), delay);
+    } else {
+      finishReveal(refocus);
+    }
   }
 
   function renderHeadline(): void {
@@ -500,11 +631,61 @@ export function mountOverlay(
 
   function renderState(): void {
     ruler.setState(modelStateText(status, progress, modelName));
-    picker.setNote(progress.ready ? "" : modelLoadingNote(progress));
+    ruler.setReloadable(status === "model-failed");
+    if (status === "model-failed") {
+      picker.setNote("読み込めませんでした");
+    } else {
+      picker.setNote(progress.ready ? "" : modelLoadingNote(progress));
+    }
   }
 
   function updateScatter(): void {
     scatterButton.disabled = !webgl || !stats || stats.placed < 2;
+  }
+
+  function readingDetail(): boolean {
+    const active = document.activeElement;
+    if (!(active instanceof Node)) {
+      return false;
+    }
+    return (
+      ledger.element.contains(active) ||
+      (loupe.pinnedId() !== null && loupe.element.contains(active))
+    );
+  }
+
+  function announceProgress(): void {
+    if (!stats) {
+      return;
+    }
+    const key = announcementKey(stats, status);
+    if (key === null || key === spokenKey || readingDetail()) {
+      return;
+    }
+    spokenKey = key;
+    announcer.say(progressAnnouncement(stats, status));
+  }
+
+  function foldLedeLater(): void {
+    if (ledeTimer !== 0 || overlay.hasAttribute("data-lede-folded")) {
+      return;
+    }
+    ledeTimer = window.setTimeout(() => {
+      overlay.setAttribute("data-lede-folded", "");
+    }, LEDE_FOLD_DELAY_MS);
+  }
+
+  function confirmFullModel(option: ModelOption): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const ask = (): void => {
+        void picker.ask(option).then(resolve);
+      };
+      if (introActive || revealing) {
+        pendingConfirm = ask;
+      } else {
+        ask();
+      }
+    });
   }
 
   return {
@@ -517,25 +698,39 @@ export function mountOverlay(
       status = next;
       overlay.dataset.status = next;
       setText(pauseButton, next === "paused" ? "再開" : "一時停止");
-      pauseButton.disabled = next === "finished";
+      pauseButton.disabled = next === "finished" || next === "model-failed";
+      if (next === "model-failed") {
+        failureNotice = failureNotice ?? mainNotice ?? localNotice;
+      } else {
+        failureNotice = null;
+      }
+      renderNotice();
       renderState();
       renderHeadline();
-      if (stats) {
-        announcer.say(progressAnnouncement(stats, status));
-      }
+      announceProgress();
     },
     setStats(next) {
       stats = next;
       overlay.toggleAttribute("data-straightening", next.placed > 0);
+      if (next.placed > 0) {
+        foldLedeLater();
+      }
       renderHeadline();
       ruler.setStats(next);
       updateScatter();
-      announcer.say(progressAnnouncement(next, status));
+      announceProgress();
     },
     upsertRecord(record) {
       records.set(record.id, record);
-      if (record.prediction && log.note(record.id)) {
+      const failedVisitor =
+        record.phase === "failed" &&
+        record.prediction === null &&
+        record.source.kind === "user";
+      if ((record.prediction || failedVisitor) && log.note(record.id)) {
         ledger.notify();
+        if (failedVisitor) {
+          noteFailedPhoto();
+        }
       }
       loupe.refresh(record);
     },
@@ -583,5 +778,6 @@ export function mountOverlay(
     setFolderProgress(progress) {
       folderStatus.report(progress);
     },
+    confirmFullModel,
   };
 }

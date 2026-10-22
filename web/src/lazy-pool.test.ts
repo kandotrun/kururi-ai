@@ -34,6 +34,14 @@ describe("createLazyPool", () => {
     expect(lazy.idleCount()).toBe(2);
   });
 
+  it("reports the size of the pool that actually arrived", async () => {
+    const real = fakePool();
+    const lazy = createLazyPool(Promise.resolve(real), 1);
+    expect(lazy.size).toBe(1);
+    await lazy.ready;
+    expect(lazy.size).toBe(3);
+  });
+
   it("forwards inference once ready", async () => {
     const real = fakePool();
     const lazy = createLazyPool(Promise.resolve(real), 3);

@@ -11,6 +11,7 @@ export interface LoupePlacementOptions {
   lift: number;
   reserveTop?: number;
   reserveBottom?: number;
+  reserveRight?: number;
 }
 
 export interface LoupePlacement {
@@ -35,14 +36,15 @@ export function placeLoupe(
   const { gap, margin, lift } = options;
   const reserveTop = options.reserveTop ?? 0;
   const reserveBottom = options.reserveBottom ?? 0;
+  const usableWidth = viewport.width - Math.max(0, options.reserveRight ?? 0);
   const minLeft = margin;
-  const maxLeft = viewport.width - margin - size.width;
+  const maxLeft = usableWidth - margin - size.width;
   const rightLeft = point.x + gap;
   const leftLeft = point.x - gap - size.width;
   let side: LoupePlacement["side"] = "right";
   let left = rightLeft;
   if (rightLeft > maxLeft) {
-    const roomRight = viewport.width - point.x;
+    const roomRight = usableWidth - point.x;
     if (leftLeft >= minLeft || point.x > roomRight) {
       side = "left";
       left = leftLeft;

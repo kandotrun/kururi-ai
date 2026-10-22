@@ -51,4 +51,22 @@ describe("placeLoupe", () => {
     });
     expect(placed.top).toBe(468);
   });
+
+  it("stays clear of a panel reserved on the right", () => {
+    const placed = placeLoupe({ x: 806, y: 414 }, size, viewport, {
+      ...options,
+      reserveRight: 556,
+    });
+    expect(placed.side).toBe("left");
+    expect(placed.left + size.width).toBeLessThanOrEqual(1440 - 556 - 12);
+  });
+
+  it("keeps clear of the right panel even when the point sits under it", () => {
+    const placed = placeLoupe({ x: 1100, y: 414 }, size, viewport, {
+      ...options,
+      reserveRight: 556,
+    });
+    expect(placed.left + size.width).toBeLessThanOrEqual(1440 - 556 - 12);
+    expect(placed.left).toBeGreaterThanOrEqual(12);
+  });
 });

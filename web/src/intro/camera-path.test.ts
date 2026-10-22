@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   type CameraPose,
+  cityToRoom,
   createCameraPath,
   createCameraPose,
   defaultDeskView,
@@ -8,9 +9,10 @@ import {
   fovForAspect,
 } from "./camera-path";
 import { arrivalView, viewFov } from "../core/layout";
-import { HERO_WINDOW } from "./city-plan";
-import { ROOM } from "./room-plan";
-import { latLonToVec3, localFrame } from "./geo-math";
+import { HERO_GLASS, HERO_WINDOW, PORTAL_SCALE } from "./city-plan";
+import { ROOM, projectPoint } from "./room-plan";
+import { type Vec3, latLonToVec3, localFrame } from "./geo-math";
+import { PORTAL, ROOM_IN } from "./timeline";
 
 const TOKYO = { lat: 35.6812, lon: 139.7671 };
 const DEG = Math.PI / 180;
@@ -166,14 +168,14 @@ describe("room camera", () => {
   });
 
   it("moves continuously", () => {
-    checkContinuity("room", 7.78, 10);
+    checkContinuity("room", PORTAL[0], 10);
   });
 
   it("opens wide on the room and narrows to the desk field of view", () => {
     for (const aspect of ASPECTS) {
       const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
       const desk = fovForAspect(aspect);
-      expect(path.room(8.1, createCameraPose()).fov).toBeGreaterThan(desk + 14);
+      expect(path.room(8.35, createCameraPose()).fov).toBeGreaterThan(desk + 14);
       expect(path.room(9.4, createCameraPose()).fov).toBeCloseTo(desk, 9);
       let previous = path.room(8.4, createCameraPose()).fov;
       for (let time = 8.4; time <= 9.4; time += 0.01) {
@@ -201,6 +203,72 @@ describe("room camera", () => {
         view.pitch / DEG,
         6,
       );
+    }
+  });
+});
+
+describe("window portal", () => {
+  it("maps the hero window glass exactly onto the room's entry opening", () => {
+    const opening = ROOM.entryWindow;
+    expect(HERO_GLASS.width * PORTAL_SCALE).toBeCloseTo(opening.halfWidth * 2, 6);
+    expect(HERO_GLASS.height * PORTAL_SCALE).toBeCloseTo(
+      opening.top - opening.bottom,
+      6,
+    );
+    expect(HERO_GLASS.width).toBeLessThan(HERO_WINDOW.width);
+    expect(HERO_GLASS.height).toBeLessThan(HERO_WINDOW.height);
+    const centre = cityToRoom([HERO_WINDOW.x, HERO_WINDOW.y, HERO_WINDOW.z], [0, 0, 0]);
+    expect(centre[0]).toBeCloseTo(opening.centerX, 9);
+    expect(centre[1]).toBeCloseTo((opening.top + opening.bottom) / 2, 9);
+    expect(centre[2]).toBeCloseTo(ROOM.entryZ + ROOM.wallThickness, 9);
+  });
+
+  it("films the room through the window from the city camera's point of view", () => {
+    for (const aspect of ASPECTS) {
+      const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
+      for (let time = PORTAL[0]; time <= ROOM_IN[1]; time += 0.01) {
+        const city = path.city(time, createCameraPose());
+        const room = path.room(time, createCameraPose());
+        const position = cityToRoom(city.position, [0, 0, 0]);
+        const target = cityToRoom(city.target, [0, 0, 0]);
+        const reach = norm(sub(position, target));
+        expect(norm(sub(room.position, position)) / reach).toBeLessThan(1e-9);
+        expect(norm(sub(room.target, target)) / reach).toBeLessThan(1e-9);
+        expect(room.fov).toBeCloseTo(city.fov, 9);
+        expect(room.near).toBeLessThan(
+          (room.position[2] - (ROOM.entryZ + ROOM.wallThickness)) * 0.9,
+        );
+        expect(room.far).toBeGreaterThan(reach + 2 * (ROOM.entryZ - ROOM.backZ));
+      }
+    }
+  });
+
+  it("fills the frame with the window glass before the room takes over", () => {
+    for (const aspect of [390 / 844, 1, 1.6, 1920 / 820]) {
+      const path = createCameraPath(aspect, TOKYO, defaultDeskView(aspect));
+      for (const time of [ROOM_IN[0], (ROOM_IN[0] + ROOM_IN[1]) / 2, ROOM_IN[1]]) {
+        const pose = path.city(time, createCameraPose());
+        const halfWidth = HERO_GLASS.width / 2;
+        const halfHeight = HERO_GLASS.height / 2;
+        const corner = (sx: number, sy: number): Vec3 =>
+          projectPoint(pose, aspect, [
+            HERO_WINDOW.x + sx * halfWidth,
+            HERO_WINDOW.y + sy * halfHeight,
+            HERO_WINDOW.z,
+          ]);
+        const topLeft = corner(-1, 1);
+        const topRight = corner(1, 1);
+        const bottomLeft = corner(-1, -1);
+        const bottomRight = corner(1, -1);
+        expect(topLeft[0]).toBeLessThan(-1);
+        expect(bottomLeft[0]).toBeLessThan(-1);
+        expect(topRight[0]).toBeGreaterThan(1);
+        expect(bottomRight[0]).toBeGreaterThan(1);
+        expect(topLeft[1]).toBeGreaterThan(1);
+        expect(topRight[1]).toBeGreaterThan(1);
+        expect(bottomLeft[1]).toBeLessThan(-1);
+        expect(bottomRight[1]).toBeLessThan(-1);
+      }
     }
   });
 });

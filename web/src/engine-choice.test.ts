@@ -28,7 +28,7 @@ describe("choosePool", () => {
     const nano = pool("nano", Promise.resolve());
     const full = vi.fn(() => pool("full", Promise.resolve()));
     const chosen = await choosePool("nano", { nano: async () => nano, full }, () => {});
-    expect(chosen).toBe(nano);
+    expect(chosen).toEqual({ pool: nano, model: "nano" });
     expect(full).not.toHaveBeenCalled();
   });
 
@@ -36,7 +36,7 @@ describe("choosePool", () => {
     const full = pool("full", Promise.resolve());
     const nano = vi.fn(async () => pool("nano", Promise.resolve()));
     const chosen = await choosePool("full", { nano, full: () => full }, () => {});
-    expect(chosen).toBe(full);
+    expect(chosen).toEqual({ pool: full, model: "full" });
     expect(nano).not.toHaveBeenCalled();
   });
 
@@ -46,7 +46,7 @@ describe("choosePool", () => {
     const nano = pool("nano", Promise.resolve());
     const onFallback = vi.fn();
     const chosen = await choosePool("full", { nano: async () => nano, full: () => full }, onFallback);
-    expect(chosen).toBe(nano);
+    expect(chosen).toEqual({ pool: nano, model: "nano" });
     expect(full.dispose).toHaveBeenCalledOnce();
     expect(onFallback).toHaveBeenCalledWith(failure);
   });
@@ -64,7 +64,7 @@ describe("choosePool", () => {
       },
       onFallback,
     );
-    expect(chosen).toBe(nano);
+    expect(chosen).toEqual({ pool: nano, model: "nano" });
     expect(onFallback).toHaveBeenCalledOnce();
   });
 });

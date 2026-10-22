@@ -33,23 +33,24 @@ export const GATHER = {
 } as const;
 
 export const CLOUD_PASS = {
-  riseStart: 5.46,
-  riseEnd: 5.9,
-  fallStart: 6.1,
-  fallEnd: 6.52,
-  peak: 0.97,
+  riseStart: 5.3,
+  riseEnd: 5.86,
+  fallStart: 6.12,
+  fallEnd: 6.6,
+  peak: 0.92,
 } as const;
 
 export const WINDOW_PASS = {
-  riseStart: 7.56,
-  riseEnd: 7.77,
-  fallStart: 7.89,
-  fallEnd: 8.06,
-  peak: 0.94,
+  riseStart: 7.97,
+  riseEnd: 8.08,
+  fallStart: 8.13,
+  fallEnd: 8.34,
+  peak: 0.3,
 } as const;
 
 export const CITY_IN: readonly [number, number] = [5.93, 6.09];
-export const ROOM_IN: readonly [number, number] = [7.79, 7.87];
+export const PORTAL: readonly [number, number] = [7.12, 7.32];
+export const ROOM_IN: readonly [number, number] = [7.88, 7.94];
 
 export function phaseAt(time: number): IntroPhase {
   let current: IntroPhase = "space";
@@ -75,6 +76,8 @@ export interface StageMix {
   globe: number;
   city: number;
   room: number;
+  portal: number;
+  opening: number;
   clouds: number;
   glow: number;
   fade: number;
@@ -87,6 +90,8 @@ export function createStageMix(): StageMix {
     globe: 1,
     city: 0,
     room: 0,
+    portal: 0,
+    opening: 0,
     clouds: 0,
     glow: 0,
     fade: 1,
@@ -101,6 +106,8 @@ export function stageMix(time: number, out: StageMix): StageMix {
   out.globe = 1 - city;
   out.city = city * (1 - room);
   out.room = room;
+  out.opening = smoothstep(PORTAL[0], PORTAL[1], time);
+  out.portal = out.opening * out.city;
   out.clouds =
     CLOUD_PASS.peak *
     envelope(
@@ -121,6 +128,6 @@ export function stageMix(time: number, out: StageMix): StageMix {
     );
   out.fade = 1 - smoothstep(HANDOFF_START, INTRO_SECONDS, time);
   out.intro = smoothstep(0, 0.7, time);
-  out.exposure = 1 + 0.18 * room * (1 - smoothstep(7.9, 8.4, time));
+  out.exposure = 1;
   return out;
 }

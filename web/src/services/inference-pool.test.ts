@@ -426,15 +426,56 @@ describe("createInferencePool", () => {
     await expect(job).resolves.toMatchObject({ correction: 0 });
   });
 
-  it("treats an init error as a crash and keeps waiting for the replacement", async () => {
+  it("does not restart a worker that reported why it could not start", async () => {
     const { pool, workers, createWorker } = setup(2);
     worker(workers, 0).reply({ type: "error", message: "wasm missing" });
-    expect(createWorker).toHaveBeenCalledTimes(3);
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(worker(workers, 0).terminated).toBe(true);
+    expect(pool.size).toBe(1);
     worker(workers, 1).ready();
-    expect(await settled(pool.ready)).toBe(false);
-    worker(workers, 2).ready();
     await expect(pool.ready).resolves.toBeUndefined();
-    expect(pool.idleCount()).toBe(2);
+    expect(pool.idleCount()).toBe(1);
+  });
+
+  it("rejects ready with the reason the worker gave for not starting", async () => {
+    const { pool, workers, createWorker } = setup(1, { initMessage: fullInit });
+    worker(workers, 0).progress(10, 100);
+    worker(workers, 0).reply({
+      type: "error",
+      message: "高精度モデルを取得できませんでした（HTTP 404）",
+    });
+    await expect(pool.ready).rejects.toThrow(
+      "高精度モデルを取得できませんでした（HTTP 404）",
+    );
+    expect(createWorker).toHaveBeenCalledTimes(1);
+    await expect(pool.infer("a", blob, 0)).rejects.toThrow(
+      "高精度モデルを取得できませんでした（HTTP 404）",
+    );
+  });
+
+  it("falls back to a general reason when the worker's reason is not for visitors", async () => {
+    const { pool, workers } = setup(1);
+    worker(workers, 0).reply({
+      type: "error",
+      message: "no available backend found. ERR: [wasm] TypeError",
+    });
+    await expect(pool.ready).rejects.toThrow("推論ワーカーを起動できませんでした");
+  });
+
+  it("keeps the reason a replacement worker gave for not starting", async () => {
+    const { pool, workers, createWorker } = setup(1, { initMessage: fullInit });
+    const queued = pool.infer("a", blob, 0);
+    worker(workers, 0).crash("Uncaught RuntimeError: unreachable");
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    worker(workers, 1).reply({
+      type: "error",
+      message: "このブラウザでは WebGPU が使えないため、高精度モデルを動かせません",
+    });
+    await expect(pool.ready).rejects.toThrow(
+      "このブラウザでは WebGPU が使えないため、高精度モデルを動かせません",
+    );
+    await expect(queued).rejects.toThrow("WebGPU");
+    expect(createWorker).toHaveBeenCalledTimes(2);
   });
 
   it("resolves ready with the workers that survived", async () => {
@@ -451,7 +492,71 @@ describe("createInferencePool", () => {
     const { pool, workers } = setup(1);
     worker(workers, 0).crash();
     worker(workers, 1).crash();
-    await expect(pool.ready).rejects.toThrow();
+    await expect(pool.ready).rejects.toThrow("推論ワーカーを起動できませんでした");
+  });
+
+  it("counts only the workers that are still alive as its size", () => {
+    const { pool, workers } = setup(2);
+    worker(workers, 0).ready();
+    worker(workers, 1).ready();
+    expect(pool.size).toBe(2);
+    worker(workers, 0).crash();
+    expect(pool.size).toBe(2);
+    worker(workers, 2).crash();
+    expect(pool.size).toBe(1);
+    worker(workers, 1).crash();
+    worker(workers, 3).crash();
+    expect(pool.size).toBe(0);
+    expect(pool.idleCount()).toBe(0);
+  });
+
+  it("says the workers stopped once the last one dies after starting", async () => {
+    const { pool, workers } = setup(1);
+    worker(workers, 0).ready();
+    const running = pool.infer("a", blob, 0);
+    const queued = pool.infer("b", blob, 0);
+    worker(workers, 0).crash("out of memory");
+    await expect(running).rejects.toThrow("out of memory");
+    expect(await settled(queued)).toBe(false);
+    worker(workers, 1).crash();
+    await expect(queued).rejects.toThrow("推論ワーカーが停止しました");
+    await expect(pool.infer("c", blob, 0)).rejects.toThrow(
+      "推論ワーカーが停止しました",
+    );
+    expect(pool.size).toBe(0);
+  });
+
+  it("gives a worker its restart back after a run of good results", async () => {
+    const { pool, workers, createWorker } = setup(1);
+    worker(workers, 0).ready();
+    worker(workers, 0).crash();
+    worker(workers, 1).ready();
+    for (let index = 0; index < 20; index += 1) {
+      const job = pool.infer(`a${index}`, blob, 0);
+      worker(workers, 1).result(`a${index}`);
+      await job;
+    }
+    worker(workers, 1).crash();
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    expect(pool.size).toBe(1);
+    worker(workers, 2).ready();
+    worker(workers, 2).crash();
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    expect(pool.size).toBe(0);
+  });
+
+  it("keeps the restart used up when good results are too few", () => {
+    const { pool, workers, createWorker } = setup(1);
+    worker(workers, 0).ready();
+    worker(workers, 0).crash();
+    worker(workers, 1).ready();
+    for (let index = 0; index < 19; index += 1) {
+      void pool.infer(`a${index}`, blob, 0);
+      worker(workers, 1).result(`a${index}`);
+    }
+    worker(workers, 1).crash();
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(pool.size).toBe(0);
   });
 
   it("terminates workers and rejects pending work on dispose", async () => {

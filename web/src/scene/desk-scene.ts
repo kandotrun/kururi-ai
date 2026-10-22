@@ -71,6 +71,9 @@ export interface DeskSceneStats {
 type HoverHandler = DeskSceneEvents["hover"];
 type SelectHandler = DeskSceneEvents["select"];
 
+export type DeskContextState = "lost" | "restored" | "failed";
+type ContextHandler = (state: DeskContextState) => void;
+
 const DESKTOP_CAPACITY = 3200;
 const LOW_POWER_CAPACITY = 900;
 const DESKTOP_TILE = 120;
@@ -81,6 +84,9 @@ const SLOW_WINDOW_SECONDS = 2;
 const REDUCED_PIXEL_RATIO = 1.25;
 const MAX_FRAME_STEP = 0.1;
 const FRONT_LOOKAHEAD = 3;
+const RESTORE_TIMEOUT_MS = 4000;
+const COVER_RATE = 5;
+const COVER_RAMP_CSS = 96;
 
 function clock(): number {
   return performance.now() / 1000;
@@ -173,16 +179,26 @@ class SortingDesk implements DeskScene {
     bottom: 0,
     left: 0,
   };
+  private readonly cover: ViewInsets = {
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  };
   private readonly hoverHandlers = new Set<HoverHandler>();
   private readonly selectHandlers = new Set<SelectHandler>();
+  private readonly contextHandlers = new Set<ContextHandler>();
   private readonly onContextLost: (event: Event) => void;
+  private readonly onContextRestored: () => void;
   private readonly onVisibility: () => void;
   private reduced: boolean;
   private started = false;
   private disposed = false;
   private lost = false;
+  private settled = false;
   private frameHandle = 0;
   private cueTimer: ReturnType<typeof setTimeout> | null = null;
+  private restoreTimer: ReturnType<typeof setTimeout> | null = null;
   private lastFrame = 0;
   private frameCount = 0;
   private slowSince = -1;
@@ -300,6 +316,8 @@ class SortingDesk implements DeskScene {
       this.handleContextLost();
     };
     canvas.addEventListener("webglcontextlost", this.onContextLost);
+    this.onContextRestored = () => this.handleContextRestored();
+    canvas.addEventListener("webglcontextrestored", this.onContextRestored);
     this.onVisibility = () => this.wake();
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", this.onVisibility);
@@ -462,6 +480,14 @@ class SortingDesk implements DeskScene {
     this.wake();
   }
 
+  setSettled(settled: boolean): void {
+    if (this.disposed || this.settled === settled) {
+      return;
+    }
+    this.settled = settled;
+    this.wake();
+  }
+
   on<K extends keyof DeskSceneEvents>(
     event: K,
     handler: DeskSceneEvents[K],
@@ -486,6 +512,7 @@ class SortingDesk implements DeskScene {
     }
     this.disposed = true;
     this.clearCue();
+    this.clearRestoreTimer();
     if (this.frameHandle) {
       cancelAnimationFrame(this.frameHandle);
       this.frameHandle = 0;
@@ -494,11 +521,16 @@ class SortingDesk implements DeskScene {
     this.input.dispose();
     this.resizeObserver?.disconnect();
     this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.canvas.removeEventListener(
+      "webglcontextrestored",
+      this.onContextRestored,
+    );
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", this.onVisibility);
     }
     this.hoverHandlers.clear();
     this.selectHandlers.clear();
+    this.contextHandlers.clear();
     this.pages.dispose();
     this.atlas.dispose();
     this.mat.dispose();
@@ -506,6 +538,13 @@ class SortingDesk implements DeskScene {
     this.digits.dispose();
     this.scene.clear();
     this.renderer.dispose();
+  }
+
+  onContext(handler: ContextHandler): () => void {
+    this.contextHandlers.add(handler);
+    return () => {
+      this.contextHandlers.delete(handler);
+    };
   }
 
   debugProject(x: number, y: number, z: number): ScreenPoint | null {
@@ -572,7 +611,8 @@ class SortingDesk implements DeskScene {
     this.frameCount += 1;
     const fleet = this.fleet;
     fleet.step(now);
-    const hoverBusy = this.stepHighlights(dt);
+    const coverBusy = this.stepCover(dt);
+    const hoverBusy = this.stepHighlights(dt) || coverBusy;
     const cameraBusy = this.stepCamera(now, dt);
     this.updateUniforms(now);
     if (
@@ -609,6 +649,7 @@ class SortingDesk implements DeskScene {
       now,
       this.fleet.placedCount,
       this.fleet.lastPlacedAt,
+      this.settled,
     );
     if (wait === null) {
       return;
@@ -652,6 +693,30 @@ class SortingDesk implements DeskScene {
     );
   }
 
+  private stepCover(dt: number): boolean {
+    const blend = 1 - Math.exp(-(this.reduced ? 30 : COVER_RATE) * dt);
+    const cover = this.cover;
+    const goal = this.insets;
+    let busy = false;
+    for (const side of ["top", "right", "bottom", "left"] as const) {
+      cover[side] += (goal[side] - cover[side]) * blend;
+      if (Math.abs(goal[side] - cover[side]) < 0.5) {
+        cover[side] = goal[side];
+      } else {
+        busy = true;
+      }
+    }
+    const scale = this.shared.uViewport.value.x / Math.max(1, this.viewWidth);
+    this.shared.uCover.value.set(
+      cover.left * scale,
+      cover.right * scale,
+      cover.top * scale,
+      cover.bottom * scale,
+    );
+    this.shared.uCoverRamp.value = COVER_RAMP_CSS * scale;
+    return busy;
+  }
+
   private focusEntry(): PrintEntry | null {
     const target = this.focused ?? this.selected;
     return target && this.fleet.has(target) ? target : null;
@@ -691,6 +756,7 @@ class SortingDesk implements DeskScene {
       viewWidth: this.viewWidth,
       viewHeight: this.viewHeight,
       insets: this.insets,
+      settled: this.settled,
     });
   }
 
@@ -850,6 +916,44 @@ class SortingDesk implements DeskScene {
       cancelAnimationFrame(this.frameHandle);
       this.frameHandle = 0;
     }
+    this.clearRestoreTimer();
+    this.restoreTimer = setTimeout(() => {
+      this.restoreTimer = null;
+      if (this.lost && !this.disposed) {
+        this.emitContext("failed");
+      }
+    }, RESTORE_TIMEOUT_MS);
+    this.emitContext("lost");
+  }
+
+  private handleContextRestored(): void {
+    if (!this.lost || this.disposed) {
+      return;
+    }
+    this.clearRestoreTimer();
+    const now = this.now();
+    this.lost = false;
+    this.atlas.restore(now);
+    this.fleet.markRestored();
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.renderer.setSize(this.viewWidth, this.viewHeight, false);
+    this.syncViewport();
+    this.lastFrame = 0;
+    this.emitContext("restored");
+    this.wake();
+  }
+
+  private clearRestoreTimer(): void {
+    if (this.restoreTimer !== null) {
+      clearTimeout(this.restoreTimer);
+      this.restoreTimer = null;
+    }
+  }
+
+  private emitContext(state: DeskContextState): void {
+    for (const handler of [...this.contextHandlers]) {
+      handler(state);
+    }
   }
 }
 
@@ -858,6 +962,19 @@ export function createDeskScene(
   options: DeskSceneOptions,
 ): DeskScene {
   return new SortingDesk(canvas, options);
+}
+
+export function onDeskSceneContext(
+  scene: DeskScene,
+  handler: (state: DeskContextState) => void,
+): () => void {
+  return scene instanceof SortingDesk ? scene.onContext(handler) : () => {};
+}
+
+export function setDeskSettled(scene: DeskScene, settled: boolean): void {
+  if (scene instanceof SortingDesk) {
+    scene.setSettled(settled);
+  }
 }
 
 export function deskSceneStats(scene: DeskScene): DeskSceneStats | null {

@@ -1,4 +1,4 @@
-import { Color, LinearSRGBColorSpace, Vector2, Vector3 } from "three";
+import { Color, LinearSRGBColorSpace, Vector2, Vector3, Vector4 } from "three";
 import { linearColor } from "./palette";
 
 export interface Uniform<T> {
@@ -18,6 +18,8 @@ export interface SharedUniforms {
   uLampTint: Uniform<Color>;
   uViewport: Uniform<Vector2>;
   uViewShift: Uniform<Vector2>;
+  uCover: Uniform<Vector4>;
+  uCoverRamp: Uniform<number>;
 }
 
 export function createSharedUniforms(): SharedUniforms {
@@ -35,5 +37,7 @@ export function createSharedUniforms(): SharedUniforms {
     },
     uViewport: { value: new Vector2(1, 1) },
     uViewShift: { value: new Vector2(0, 0) },
+    uCover: { value: new Vector4(0, 0, 0, 0) },
+    uCoverRamp: { value: 96 },
   };
 }

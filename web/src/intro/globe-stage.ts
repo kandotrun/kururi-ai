@@ -216,6 +216,9 @@ export class GlobeStage {
         uSun: { value: 1.9 },
         uJapanBounds: { value: JAPAN_BOUNDS },
         uDetail: { value: 0 },
+        uTargetLonLat: {
+          value: new Vector2(options.target.lon, options.target.lat),
+        },
       },
       vertexShader: SPHERE_VERTEX,
       fragmentShader: EARTH_FRAGMENT,

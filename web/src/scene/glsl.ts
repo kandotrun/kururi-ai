@@ -10,6 +10,8 @@ uniform vec3 uMatDeep;
 uniform vec3 uLampTint;
 uniform vec2 uViewport;
 uniform vec2 uViewShift;
+uniform vec4 uCover;
+uniform float uCoverRamp;
 `;
 
 export const SHARED_FUNCTIONS_GLSL = `
@@ -55,7 +57,13 @@ float vignette(vec2 fragCoord) {
   vec2 centred = fragCoord / max(uViewport, vec2(1.0)) - vec2(0.5 + uViewShift.x, 0.46 - uViewShift.y);
   centred.x *= uViewport.x / max(uViewport.y, 1.0);
   float reach = length(centred) / (0.5 * length(vec2(uViewport.x / max(uViewport.y, 1.0), 1.0)));
-  return 1.0 - 0.34 * smoothstep(0.35, 1.05, reach);
+  float ramp = max(uCoverRamp, 1.0);
+  float left = 1.0 - smoothstep(uCover.x - ramp, uCover.x, fragCoord.x);
+  float right = smoothstep(uViewport.x - uCover.y, uViewport.x - uCover.y + ramp, fragCoord.x);
+  float top = smoothstep(uViewport.y - uCover.z, uViewport.y - uCover.z + ramp, fragCoord.y);
+  float bottom = 1.0 - smoothstep(uCover.w - ramp, uCover.w, fragCoord.y);
+  float covered = max(max(left * step(1.0, uCover.x), right * step(1.0, uCover.y)), max(top * step(1.0, uCover.z), bottom * step(1.0, uCover.w)));
+  return (1.0 - 0.34 * smoothstep(0.35, 1.05, reach)) * (1.0 - 0.26 * covered);
 }
 
 float fogAmount(vec2 xz) {

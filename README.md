@@ -31,18 +31,23 @@ Python/MPS path; v2 uses the Rust/ONNX CPU path.
 The release is available on
 [GitHub Releases v2.0.0](https://github.com/kandotrun/kururi-ai/releases/tag/v2.0.0).
 
-- [Browser v2-nano demo](https://kururi-ai.2-38.com/)
+- [Browser demo](https://kururi-ai.2-38.com/)
 - `kururi-ai-v2.0.0-macos-arm64.tar.gz`
 - `kururi-ai-v2.0.0-linux-x86_64.tar.gz`
 - `kururi-ai-v2.0.0-model.tar.gz`
 - `SHA256SUMS`
 
 The browser demo runs an approximately 11.9MB Nano ensemble with ONNX Runtime
-Web/WASM on a 3D sorting desk. It streams thousands of Wikimedia Commons
-featured pictures onto the desk, rotates them on purpose, and straightens them
-inside the browser. Your own photos are processed locally and never uploaded.
+Web/WASM on a 3D sorting desk. After a short intro from space to Tokyo, about
+2,800 Wikimedia Commons featured pictures land on the desk, rotated on purpose,
+and the model turns each one upright inside the browser. You can add your own
+photos or a whole folder; RAW files such as DNG and NEF are judged from their
+embedded JPEG preview. Your photos are processed locally and never uploaded.
 Nano is a separate demo model at 81.82% on its frozen test, distinct from the
-full v2.0.0 result.
+full v2.0.0 result. Browsers with WebGPU can switch to the full v2.0.0
+ensemble: about 551MB, followed right away by the 199MB fallback model, kept in
+the browser's Cache Storage. The live accuracy on the page is an indication for
+these public photos, not a benchmark. See [web/README.md](web/README.md).
 
 Read [the model card](MODEL_CARD.md) and
 [benchmark report](BENCHMARK_REPORT.md) for the 176-image test set, provisional

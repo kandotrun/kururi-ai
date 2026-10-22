@@ -128,7 +128,6 @@ class FakeLoader implements ImageLoader {
 }
 
 class FakePool implements InferencePool {
-  readonly size: number;
   readonly ready: Promise<void>;
   readonly calls: Array<{ id: string; simulated: Quarter; blob: Blob }> = [];
   readonly jobs = new Map<string, Deferred<Prediction>>();
@@ -136,10 +135,11 @@ class FakePool implements InferencePool {
   autoCorrection: Quarter | null = null;
   overbooked = 0;
   private readyWorkers: number;
+  private alive: number;
   private readonly readyGate = deferred<void>();
 
   constructor(size: number, readyWorkers: number) {
-    this.size = size;
+    this.alive = size;
     this.readyWorkers = readyWorkers;
     this.ready = this.readyGate.promise;
     if (readyWorkers > 0) {
@@ -147,9 +147,21 @@ class FakePool implements InferencePool {
     }
   }
 
+  get size(): number {
+    return this.alive;
+  }
+
   setReady(count: number): void {
     this.readyWorkers = count;
     this.readyGate.resolve();
+  }
+
+  die(message = "推論ワーカーが停止しました"): void {
+    this.alive = 0;
+    this.readyWorkers = 0;
+    for (const id of this.ids()) {
+      this.reject(id, message);
+    }
   }
 
   idleCount(): number {
@@ -417,7 +429,7 @@ function harness(options: HarnessOptions = {}) {
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     simulateUser: () => settings.simulateUser,
     reducedMotion: () => settings.reducedMotion,
-    limits,
+    limits: () => limits,
     onStatus: (status) => statuses.push(status),
     onNotice: (message) => notices.push(message),
   };
@@ -437,6 +449,7 @@ function harness(options: HarnessOptions = {}) {
     pool,
     scene,
     store,
+    limits,
     statuses,
     notices,
     actions,
@@ -1579,6 +1592,237 @@ describe("visitor batches", () => {
       "focus:user-2",
       "focus:user-3",
     ]);
+  });
+});
+
+describe("turned-away photos", () => {
+  function samples(count: number): PhotoSource[] {
+    return Array.from({ length: count }, (_, index) => sample(index, 0));
+  }
+
+  it("hands back nothing when the desk takes every photo", () => {
+    const h = harness({ sources: many(3) });
+    expect(h.stream.addUserFiles([file("a.jpg"), file("b.jpg")])).toEqual([]);
+  });
+
+  it("hands back the photos the desk had no room for", () => {
+    const h = harness({ sources: samples(9), maxPrints: 10 });
+    const drop = [file("a.jpg"), file("b.jpg"), file("c.jpg")];
+    const turnedAway = h.stream.addUserFiles(drop);
+    expect(turnedAway).toEqual([drop[1], drop[2]]);
+    expect(h.makeUser).toHaveBeenCalledTimes(1);
+    expect(h.notices.at(-1)).toBe(
+      "机がいっぱいなので、2枚は並べられませんでした。",
+    );
+  });
+
+  it("hands back nothing for an empty drop", () => {
+    const h = harness({ sources: samples(5), maxPrints: 5 });
+    expect(h.stream.addUserFiles([])).toEqual([]);
+  });
+
+  it("hands back the whole drop after dispose", () => {
+    const h = harness({ sources: many(3) });
+    h.stream.dispose();
+    const drop = [file("a.jpg"), file("b.jpg")];
+    expect(h.stream.addUserFiles(drop)).toEqual(drop);
+    expect(h.makeUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("changing limits", () => {
+  it("reads the load limit again on every step", async () => {
+    const h = harness({ sources: many(10), maxLoading: 1, maxPile: 8 });
+    h.stream.start();
+    await tick(0);
+    expect(h.loader.calls).toEqual(["c0"]);
+    h.limits.maxLoading = 3;
+    h.loader.succeed("c0");
+    await tick(0);
+    expect(h.loader.ids()).toEqual(["c1", "c2", "c3"]);
+  });
+
+  it("follows an opening batch that shrinks before the model is ready", async () => {
+    const h = harness({
+      sources: many(30),
+      maxPile: 2,
+      maxLoading: 2,
+      openingBatch: 12,
+      openingHoldMs: 500,
+      readyWorkers: 0,
+    });
+    h.loader.auto = true;
+    h.stream.start();
+    await tick(0);
+    expect(h.loader.calls).toHaveLength(12);
+    h.limits.openingBatch = 4;
+    h.pool.setReady(2);
+    await tick(499);
+    expect(h.pool.calls).toHaveLength(0);
+    await tick(1);
+    expect(h.pool.ids()).toEqual(["c0", "c1"]);
+    expect(h.loader.calls).toHaveLength(12);
+  });
+
+  it("waits for a larger opening batch chosen before the model is ready", async () => {
+    const h = harness({
+      sources: many(30),
+      maxPile: 2,
+      maxLoading: 2,
+      openingBatch: 3,
+      openingHoldMs: 500,
+      readyWorkers: 0,
+    });
+    h.loader.auto = true;
+    h.stream.start();
+    await tick(0);
+    expect(h.loader.calls).toHaveLength(3);
+    h.limits.openingBatch = 6;
+    h.pool.setReady(2);
+    await tick(0);
+    expect(h.loader.calls).toHaveLength(6);
+    await tick(500);
+    expect(h.pool.ids()).toEqual(["c0", "c1"]);
+  });
+
+  it("measures the room for visitors' photos with the current desk size", () => {
+    const h = harness({ sources: [], maxPrints: 2 });
+    expect(h.stream.addUserFiles([file("a.jpg"), file("b.jpg"), file("c.jpg")])).toHaveLength(1);
+    h.limits.maxPrints = 5;
+    expect(h.stream.addUserFiles([file("d.jpg"), file("e.jpg"), file("f.jpg"), file("g.jpg")])).toHaveLength(1);
+    expect(h.store.getState().total).toBe(5);
+  });
+});
+
+describe("stopped workers", () => {
+  const STOPPED =
+    "推論ワーカーが止まったため、ここから先の写真は判定できません。ページを再読み込みしてください。";
+
+  it("fails every photo still waiting and stops loading when the workers stop", async () => {
+    const h = harness({ sources: many(20), maxPile: 4, maxLoading: 2 });
+    h.loader.auto = true;
+    h.stream.start();
+    await tick(0);
+    expect(h.pool.ids()).toEqual(["c0", "c1"]);
+    expect(h.phaseOf("c5")).toBe("waiting");
+    h.pool.die("worker crashed");
+    await tick(0);
+    const failed = ["c0", "c1", "c2", "c3", "c4", "c5"];
+    expect(failed.map((id) => h.phaseOf(id))).toEqual(failed.map(() => "failed"));
+    expect(h.store.getState().records.get("c0")?.error).toBe("worker crashed");
+    expect(h.store.getState().records.get("c5")?.error).toBe(
+      "推論ワーカーが停止したため判定できませんでした",
+    );
+    expect(h.scene.removed()).toEqual(expect.arrayContaining(failed));
+    expect(h.loader.calls).toHaveLength(6);
+    expect(h.store.getState().total).toBe(6);
+    expect(h.notices).toEqual([STOPPED]);
+    expect(h.statuses.at(-1)).toBe("model-failed");
+    const actionCount = h.actions.length;
+    const statusCount = h.statuses.length;
+    await tick(10_000);
+    expect(h.actions).toHaveLength(actionCount);
+    expect(h.statuses).toHaveLength(statusCount);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("notices workers that stopped while they had nothing to do", async () => {
+    const h = harness({ sources: many(4), maxPile: 2, maxLoading: 1 });
+    h.stream.start();
+    await tick(0);
+    h.pool.die();
+    h.loader.succeed("c0");
+    await tick(0);
+    expect(h.phaseOf("c0")).toBe("failed");
+    expect(h.pool.calls).toHaveLength(0);
+    expect(h.loader.calls).toEqual(["c0"]);
+    expect(h.statuses.at(-1)).toBe("model-failed");
+    expect(h.notices).toEqual([STOPPED]);
+  });
+
+  it("fails photos that are still loading or waiting for a retry", async () => {
+    const h = harness({ sources: many(6), maxPile: 4, maxLoading: 3 });
+    h.stream.start();
+    await tick(0);
+    h.loader.rateLimit("c0", 5_000);
+    await tick(0);
+    expect(h.loader.ids()).toEqual(["c1", "c2"]);
+    const signal = h.loader.pending.get("c1")?.signal;
+    h.pool.die();
+    h.stream.addUserFiles([file("late.jpg")]);
+    await tick(0);
+    expect(signal?.aborted).toBe(true);
+    expect(["c0", "c1", "c2"].map((id) => h.phaseOf(id))).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(h.store.getState().records.get("c1")?.error).toBe(
+      "推論ワーカーが停止したため判定できませんでした",
+    );
+    expect(h.store.getState().records.size).toBe(3);
+    await tick(10_000);
+    expect(h.loader.calls).toEqual(["c0", "c1", "c2"]);
+    expect(h.notices).toEqual([STOPPED]);
+  });
+
+  it("fails visitors' photos that were already queued", async () => {
+    const h = harness({ sources: [], maxLoading: 1, readyWorkers: 0 });
+    h.stream.addUserFiles([file("a.jpg"), file("b.jpg"), file("c.jpg")]);
+    h.stream.start();
+    await tick(0);
+    h.pool.setReady(2);
+    h.pool.die();
+    await tick(0);
+    expect(["user-1", "user-2", "user-3"].map((id) => h.phaseOf(id))).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
+    expect(h.loader.calls).toEqual(["user-1"]);
+    expect(h.store.getState().total).toBe(3);
+  });
+
+  it("turns new visitors' photos away once the workers have stopped", async () => {
+    const h = harness({ sources: many(2), reducedMotion: true });
+    h.loader.auto = true;
+    h.pool.autoCorrection = 0;
+    h.stream.start();
+    await tick(1_000);
+    expect(h.statuses.at(-1)).toBe("finished");
+    h.pool.die();
+    const drop = [file("a.jpg"), file("b.jpg")];
+    expect(h.stream.addUserFiles(drop)).toEqual(drop);
+    expect(h.makeUser).not.toHaveBeenCalled();
+    expect(h.statuses.at(-1)).toBe("model-failed");
+    expect(h.notices).toEqual([STOPPED]);
+  });
+
+  it("lets photos that were already decided finish their flight", async () => {
+    const h = harness({ sources: many(3), maxPile: 1, maxLoading: 1, poolSize: 1 });
+    h.loader.auto = true;
+    h.scene.autoPlace = false;
+    h.stream.start();
+    await tick(0);
+    h.pool.answer("c0", 1);
+    await tick(1_000);
+    expect(h.phaseOf("c0")).toBe("placing");
+    h.pool.die();
+    await tick(0);
+    h.scene.arrive("c0");
+    await tick(0);
+    expect(h.phaseOf("c0")).toBe("placed");
+    expect(h.statuses.at(-1)).toBe("model-failed");
+  });
+
+  it("ignores a pool that has not started yet", async () => {
+    const h = harness({ sources: many(2), poolSize: 0, readyWorkers: 0 });
+    h.loader.auto = true;
+    h.stream.start();
+    await tick(1_000);
+    expect(h.phaseOf("c0")).toBe("waiting");
+    expect(h.statuses.at(-1)).toBe("running");
+    expect(h.notices).toEqual([]);
   });
 });
 

@@ -1,9 +1,10 @@
 import type { GeoPoint } from "../contracts";
 import { arrivalView, viewFov } from "../core/layout";
-import { HERO_WINDOW } from "./city-plan";
+import { HERO_WINDOW, PORTAL_SCALE } from "./city-plan";
 import { clamp, monotoneSpline, smootherstep, vectorTrack } from "./easing";
 import { type Vec3, latLonToVec3, localFrame } from "./geo-math";
 import { ROOM } from "./room-plan";
+import { ROOM_IN } from "./timeline";
 
 export interface CameraPose {
   position: Vec3;
@@ -34,6 +35,15 @@ export const EARTH_RADIUS_M = 6_371_000;
 const CITY_SCALE = 3400 / (0.0045 * EARTH_RADIUS_M);
 const ROOM_WIDEN = 20;
 const ROOM_NARROW: readonly [number, number] = [8.45, 9.3];
+const ROOM_OPEN_END = 8.3;
+const ROOM_HAND = ROOM_IN[1];
+const ROOM_DEPTH = ROOM.entryZ - ROOM.backZ;
+const ROOM_GLASS_Z = ROOM.entryZ + ROOM.wallThickness;
+const ROOM_GLASS: Vec3 = [
+  ROOM.entryWindow.centerX,
+  (ROOM.entryWindow.bottom + ROOM.entryWindow.top) / 2,
+  ROOM_GLASS_Z,
+];
 
 export function createCameraPose(): CameraPose {
   return {
@@ -85,6 +95,25 @@ export function deskViewPose(
   out.fov = fovForAspect(aspect);
   out.near = Math.max(0.05, view.distance * 0.04);
   out.far = 400;
+  return out;
+}
+
+export function cityToRoom(point: readonly number[], out: Vec3): Vec3 {
+  out[0] = (point[0]! - HERO_WINDOW.x) * PORTAL_SCALE + ROOM_GLASS[0];
+  out[1] = (point[1]! - HERO_WINDOW.y) * PORTAL_SCALE + ROOM_GLASS[1];
+  out[2] = (point[2]! - HERO_WINDOW.z) * PORTAL_SCALE + ROOM_GLASS[2];
+  return out;
+}
+
+function roomClip(out: CameraPose): CameraPose {
+  const outside = out.position[2] - ROOM_GLASS_Z;
+  const reach = Math.hypot(
+    out.target[0] - out.position[0],
+    out.target[1] - out.position[1],
+    out.target[2] - out.position[2],
+  );
+  out.near = clamp(outside * 0.5, 0.08, 400);
+  out.far = Math.max(300, reach + 2 * ROOM_DEPTH + 60);
   return out;
 }
 
@@ -181,24 +210,61 @@ export function createCameraPath(
   const [ex, ey, ez] = end.position;
   const [tx, ty, tz] = end.target;
   const entryX = ROOM.entryWindow.centerX;
-  const roomPosition = vectorTrack([
-    { t: 7.78, v: [entryX + 0.2, 8.6, ROOM.entryZ + 6.5] },
-    { t: 8.04, v: [entryX, 8.5, ROOM.entryZ - 2.0] },
-    { t: 8.5, v: [entryX * 0.5, 8.0, ROOM.entryZ - 4.4] },
-    { t: 8.98, v: [ex * 0.7 + 0.05, ey * 0.62 + 6.6 * 0.38, ez * 0.62 + 8.4 * 0.38] },
-    { t: 9.4, v: [ex, ey, ez], slope: [0, 0, 0] },
-  ]);
-  const roomTarget = vectorTrack([
-    { t: 7.78, v: [0.2, 1.6, -4.4] },
-    { t: 8.04, v: [0.1, 1.1, -4.2] },
-    { t: 8.5, v: [0.05, 0.6, -3.5] },
-    { t: 8.98, v: [tx * 0.8, 0.08, tz * 0.8 - 0.7] },
-    { t: 9.4, v: [tx, ty, tz], slope: [0, 0, 0] },
-  ]);
   const frame = localFrame(target);
   const focus = latLonToVec3(target);
   const scratch = [0, 0, 0];
   const sub: Vec3 = [0, 0, 0];
+
+  const cityPose = (time: number, out: CameraPose): CameraPose => {
+    const distance = Math.exp(logDistance(time)) * CITY_SCALE;
+    const theta = elevation(time) * DEG;
+    const psi = azimuth(time) * DEG;
+    const flat = distance * Math.cos(theta);
+    set(
+      out.position,
+      HERO_WINDOW.x + flat * Math.sin(psi),
+      HERO_WINDOW.y + distance * Math.sin(theta),
+      HERO_WINDOW.z + flat * Math.cos(psi),
+    );
+    set(
+      out.target,
+      HERO_WINDOW.x,
+      HERO_WINDOW.y,
+      HERO_WINDOW.z - lookAhead(time),
+    );
+    set(out.up, 0, 1, 0);
+    out.fov = fov;
+    out.near = clamp(distance * 0.08, 0.04, 40);
+    out.far = 60000;
+    return out;
+  };
+
+  const portalPose = (time: number, out: CameraPose): CameraPose => {
+    cityPose(time, out);
+    cityToRoom(out.position, out.position);
+    cityToRoom(out.target, out.target);
+    return roomClip(out);
+  };
+
+  const hand = portalPose(ROOM_HAND, createCameraPose());
+  const before = portalPose(ROOM_HAND - 1e-3, createCameraPose());
+  const handVelocity = [0, 1, 2].map(
+    (axis) => (hand.position[axis]! - before.position[axis]!) / 1e-3,
+  );
+  const roomPosition = vectorTrack([
+    { t: ROOM_HAND, v: hand.position, slope: handVelocity },
+    { t: 8.2, v: [entryX * 0.8, 6.4, ROOM.entryZ - 0.8] },
+    { t: 8.55, v: [entryX * 0.5, 7.6, ROOM.entryZ - 4.2] },
+    { t: 8.98, v: [ex * 0.7 + 0.05, ey * 0.62 + 6.6 * 0.38, ez * 0.62 + 8.4 * 0.38] },
+    { t: 9.4, v: [ex, ey, ez], slope: [0, 0, 0] },
+  ]);
+  const roomTarget = vectorTrack([
+    { t: ROOM_HAND, v: hand.target, slope: handVelocity },
+    { t: 8.2, v: [0.25, 2.4, -1.8] },
+    { t: 8.55, v: [0.05, 0.6, -3.5] },
+    { t: 8.98, v: [tx * 0.8, 0.08, tz * 0.8 - 0.7] },
+    { t: 9.4, v: [tx, ty, tz], slope: [0, 0, 0] },
+  ]);
 
   return {
     aspect,
@@ -229,30 +295,11 @@ export function createCameraPath(
       out.far = distance + 3;
       return out;
     },
-    city(time, out) {
-      const distance = Math.exp(logDistance(time)) * CITY_SCALE;
-      const theta = elevation(time) * DEG;
-      const psi = azimuth(time) * DEG;
-      const flat = distance * Math.cos(theta);
-      set(
-        out.position,
-        HERO_WINDOW.x + flat * Math.sin(psi),
-        HERO_WINDOW.y + distance * Math.sin(theta),
-        HERO_WINDOW.z + flat * Math.cos(psi),
-      );
-      set(
-        out.target,
-        HERO_WINDOW.x,
-        HERO_WINDOW.y,
-        HERO_WINDOW.z - lookAhead(time),
-      );
-      set(out.up, 0, 1, 0);
-      out.fov = fov;
-      out.near = clamp(distance * 0.08, 0.04, 40);
-      out.far = 60000;
-      return out;
-    },
+    city: cityPose,
     room(time, out) {
+      if (time < ROOM_HAND) {
+        return portalPose(time, out);
+      }
       roomPosition(time, scratch);
       set(out.position, scratch[0]!, scratch[1]!, scratch[2]!);
       roomTarget(time, scratch);
@@ -260,10 +307,10 @@ export function createCameraPath(
       set(out.up, 0, 1, 0);
       out.fov =
         fov +
-        ROOM_WIDEN * (1 - smootherstep(ROOM_NARROW[0], ROOM_NARROW[1], time));
-      out.near = 0.08;
-      out.far = 300;
-      return out;
+        ROOM_WIDEN *
+          smootherstep(ROOM_HAND, ROOM_OPEN_END, time) *
+          (1 - smootherstep(ROOM_NARROW[0], ROOM_NARROW[1], time));
+      return roomClip(out);
     },
   };
 }

@@ -9,6 +9,9 @@ import {
   DESK_YAW,
   type DeskBounds,
   MIN_FREE_FRACTION,
+  ARRIVAL_DEPTH,
+  ARRIVAL_WIDTH,
+  arrivalFrame,
   arrivalView,
   borderWidth,
   cellSlot,
@@ -840,5 +843,51 @@ describe("screenExtent", () => {
     const behind = { minX: -1, maxX: 1, minZ: 5, maxZ: 9 };
     const extent = screenExtent(behind, view, fov, 1.3);
     expect(extent.maxY).toBe(Infinity);
+  });
+});
+
+describe("arrivalFrame", () => {
+  const none = { top: 0, right: 0, bottom: 0, left: 0 };
+
+  it("is the arrival view with no shift when nothing covers the canvas", () => {
+    for (const [width, height] of [
+      [1440, 900],
+      [390, 844],
+      [900, 900],
+    ] as const) {
+      const frame = arrivalFrame(width, height, none);
+      const view = arrivalView(width / height);
+      expect(frame.view.distance).toBeCloseTo(view.distance, 9);
+      expect(frame.view.targetX).toBeCloseTo(view.targetX, 9);
+      expect(frame.view.targetZ).toBeCloseTo(view.targetZ, 9);
+      expect(frame.view.pitch).toBeCloseTo(view.pitch, 12);
+      expect(frame.view.yaw).toBeCloseTo(view.yaw, 12);
+      expect(frame.shiftX).toBe(0);
+      expect(frame.shiftY).toBe(0);
+      expect(frame.fovY).toBeCloseTo(viewFov(width / height), 12);
+    }
+  });
+
+  it("frames the arrival area inside the free rectangle", () => {
+    const insets = { top: 64, right: 0, bottom: 68, left: 518 };
+    const frame = arrivalFrame(1440, 900, insets);
+    const free = viewFrame(1440, 900, insets);
+    const expected = frameArea(
+      {
+        minX: -ARRIVAL_WIDTH / 2,
+        maxX: ARRIVAL_WIDTH / 2,
+        minZ: -ARRIVAL_DEPTH / 2,
+        maxZ: ARRIVAL_DEPTH / 2,
+      },
+      ARRIVAL_PITCH,
+      DESK_YAW,
+      free.fovY,
+      free.aspect,
+    );
+    expect(frame.view).toEqual(expected);
+    expect(frame.shiftX).toBeCloseTo(free.shiftX, 12);
+    expect(frame.shiftY).toBeCloseTo(free.shiftY, 12);
+    expect(frame.fovY).toBeCloseTo(free.cameraFovY, 12);
+    expect(frame.view.distance).toBeGreaterThan(arrivalView(1.6).distance);
   });
 });

@@ -34,9 +34,13 @@ interface Harness {
   visibleFiles: string[][];
 }
 
+type Prefetch = (
+  assets: readonly EnsembleAsset[],
+) => Promise<Map<string, AssetBytes> | null>;
+
 function harness(
   logits: (model: string) => Float32Array,
-  options: { failFallback?: number } = {},
+  options: { failFallback?: number; prefetch?: Prefetch } = {},
 ) {
   const state: Harness = {
     loads: [],
@@ -52,6 +56,7 @@ function harness(
   let fallbackFailures = options.failFallback ?? 0;
   const engine = createFullEngine({
     manifest,
+    prefetchAssets: options.prefetch,
     async loadAssets(assets: readonly EnsembleAsset[], onProgress) {
       state.loads.push(assets.map((asset) => asset.file));
       if (assets.some((asset) => asset.file.startsWith("convnext-small-224"))) {
@@ -209,6 +214,76 @@ describe("createFullEngine", () => {
     const decision = await engine.process(photo());
     expect(decision.fallbackUsed).toBe(true);
     expect(state.loads.length).toBe(3);
+  });
+
+  it("leaves prefetched fallback bytes in the cache and reads them when needed", async () => {
+    const prefetched: string[][] = [];
+    const { engine, state } = harness(
+      (model) => (model === "convnext-small-224" ? peaked(2) : new Float32Array(16)),
+      {
+        prefetch: async (assets) => {
+          prefetched.push(assets.map((asset) => asset.file));
+          return null;
+        },
+      },
+    );
+    await engine.initialize(null);
+    engine.prefetchFallback();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(prefetched).toEqual([["convnext-small-224.onnx", "convnext-small-224.onnx.data"]]);
+    expect(state.loads).toHaveLength(1);
+    const decision = await engine.process(photo());
+    expect(decision.fallbackUsed).toBe(true);
+    expect(state.loads[1]).toEqual(["convnext-small-224.onnx", "convnext-small-224.onnx.data"]);
+    expect(state.loads).toHaveLength(2);
+  });
+
+  it("keeps prefetched bytes the cache could not hold and uses them", async () => {
+    const { engine, state } = harness(
+      (model) => (model === "convnext-small-224" ? peaked(2) : new Float32Array(16)),
+      {
+        prefetch: async (assets) =>
+          new Map<string, AssetBytes>(assets.map((asset) => [asset.file, new Uint8Array(1)])),
+      },
+    );
+    await engine.initialize(null);
+    engine.prefetchFallback();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const decision = await engine.process(photo());
+    expect(decision.fallbackUsed).toBe(true);
+    expect(state.loads).toHaveLength(1);
+    expect(state.created).toContain("convnext-small-224");
+  });
+
+  it("waits for a running prefetch instead of downloading twice", async () => {
+    let finish: (value: Map<string, AssetBytes> | null) => void = () => {};
+    const { engine, state } = harness(
+      (model) => (model === "convnext-small-224" ? peaked(2) : new Float32Array(16)),
+      { prefetch: () => new Promise((resolve) => (finish = resolve)) },
+    );
+    await engine.initialize(null);
+    engine.prefetchFallback();
+    const pending = engine.process(photo());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(state.loads).toHaveLength(1);
+    finish(null);
+    const decision = await pending;
+    expect(decision.fallbackUsed).toBe(true);
+    expect(state.loads).toHaveLength(2);
+  });
+
+  it("downloads the fallback when the prefetch into the cache failed", async () => {
+    const { engine, state } = harness(
+      (model) => (model === "convnext-small-224" ? peaked(2) : new Float32Array(16)),
+      { prefetch: async () => Promise.reject(new Error("quota")) },
+    );
+    await engine.initialize(null);
+    engine.prefetchFallback();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(state.fallbackErrors).toHaveLength(1);
+    const decision = await engine.process(photo());
+    expect(decision.fallbackUsed).toBe(true);
+    expect(state.loads).toHaveLength(2);
   });
 
   it("ignores a prefetch before the engine is ready", async () => {

@@ -39,6 +39,14 @@ The timm implementation is maintained in
 MobileNetV4 and ConvNeXt-Tiny were evaluated during development but are not
 included in the v2 release asset.
 
+The web demo also redistributes these v2 weights from
+`https://kururi-ai.2-38.com/models/v2.0.0/`. The same origin serves the
+Apache-2.0 text (`LICENSE`), the release archive's `THIRD_PARTY_NOTICES.md`
+and `MODEL_CARD.md`, and the upstream model cards, configs and provenance JSON
+(`upstream/convnext-base/`, `upstream/convnext-small/`) next to them. The web
+demo's own notices, including its MobileNetV4 v2-nano derivatives, are in
+[web/THIRD_PARTY_NOTICES.md](web/THIRD_PARTY_NOTICES.md).
+
 ## Native runtime
 
 - ONNX Runtime `1.31.0`: Microsoft Corporation, MIT.

@@ -5,8 +5,7 @@ import { commonsThumbUrl, decodeManifest } from "../src/core/manifest.ts";
 
 const [outDir, countText] = process.argv.slice(2);
 const count = Number(countText ?? "32");
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+const UA = "kururi-ai-web-demo/1.0 (https://github.com/kandotrun/kururi-ai; engine parity fetch)";
 const manifest = decodeManifest(
   JSON.parse(await readFile(new URL("../public/commons/manifest.json", import.meta.url), "utf8")),
 );
@@ -32,7 +31,7 @@ async function fetchOne({ id, entry }) {
     return { id, file: `${id}.jpg`, url, ok: true, cached: true };
   } catch {}
   for (let attempt = 0; attempt < 7; attempt += 1) {
-    const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "image/avif,image/webp,image/*,*/*;q=0.8" } });
+    const response = await fetch(url, { headers: { "User-Agent": UA, Accept: "image/*" } });
     if (response.status === 429 || response.status >= 500) {
       const retry = Number(response.headers.get("retry-after") ?? "0");
       await wait(Math.max(retry * 1000, 1500 * 2 ** attempt));
@@ -42,7 +41,7 @@ async function fetchOne({ id, entry }) {
       return { id, url, ok: false, status: response.status };
     }
     await writeFile(path, new Uint8Array(await response.arrayBuffer()));
-    await wait(Number(process.argv[5] ?? "250"));
+    await wait(Number(process.argv[5] ?? "1000"));
     return { id, file: `${id}.jpg`, url, ok: true, cached: false };
   }
   return { id, url, ok: false, status: 429 };
@@ -51,7 +50,7 @@ async function fetchOne({ id, entry }) {
 const results = [];
 const queue = [...chosen];
 await Promise.all(
-  Array.from({ length: Number(process.argv[4] ?? "4") }, async () => {
+  Array.from({ length: Number(process.argv[4] ?? "2") }, async () => {
     while (queue.length > 0) {
       results.push(await fetchOne(queue.shift()));
     }

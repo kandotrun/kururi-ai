@@ -10,6 +10,7 @@ import {
 } from "../core/tiff-preview.fixtures";
 import {
   createImageLoader,
+  createVisitorPreviews,
   RateLimitedError,
   visitorPreviewBlob,
 } from "./image-loader";
@@ -862,28 +863,55 @@ describe("createImageLoader with visitors' RAW files", () => {
   });
 });
 
-describe("visitorPreviewBlob", () => {
+function rawPhoto(name: string): File {
+  const dng = proRawLikeDng({ orientation: 8, size: 3_000_000, rawAt: 1_000_000 });
+  return userFile(dng.file.bytesAt(0, dng.file.size), name);
+}
+
+function gatedDecoder() {
+  const waiting: Array<() => void> = [];
+  const state = { active: 0, peak: 0 };
+  const decode = vi.fn(async (_blob: Blob, options?: ImageBitmapOptions) => {
+    state.active += 1;
+    state.peak = Math.max(state.peak, state.active);
+    await new Promise<void>((resolve) => waiting.push(resolve));
+    state.active -= 1;
+    return bitmap(options?.resizeWidth ?? 4032, options?.resizeHeight ?? 3024, "decoded");
+  });
+  const release = () => {
+    for (const next of waiting.splice(0)) {
+      next();
+    }
+  };
+  return { decode, release, state };
+}
+
+async function flush(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+describe("createVisitorPreviews", () => {
   it("returns ordinary photos unchanged", async () => {
     const file = userFile(new Uint8Array([1, 2]), "a.jpg", "image/jpeg");
     const decode = vi.fn();
-    expect(await visitorPreviewBlob(file, 960, { decode })).toBe(file);
+    const preview = createVisitorPreviews({ maxSide: 960, decode });
+    expect(await preview(file)).toBe(file);
     expect(decode).not.toHaveBeenCalled();
   });
 
   it("renders an upright JPEG of a RAW file at the requested size", async () => {
-    const dng = proRawLikeDng({
-      orientation: 8,
-      size: 3_000_000,
-      rawAt: 1_000_000,
-    });
-    const file = userFile(dng.file.bytesAt(0, dng.file.size), "photo-0009.DNG");
+    const file = rawPhoto("photo-0009.DNG");
     const { decode, calls } = rawDecoder(4032, 3024);
     const { orient, made } = orienter();
-    const blob = await visitorPreviewBlob(file, 960, {
+    const preview = createVisitorPreviews({
+      maxSide: 960,
       decode,
       orient,
       resize: sizedResize().resize,
     });
+    const blob = await preview(file);
     expect(calls[0]?.options).toMatchObject({
       resizeWidth: 960,
       resizeHeight: 720,
@@ -895,8 +923,104 @@ describe("visitorPreviewBlob", () => {
 
   it("passes loading errors on", async () => {
     const file = userFile(new TextEncoder().encode("nope"), "x.NEF");
-    await expect(visitorPreviewBlob(file, 960, {})).rejects.toThrow(
-      /プレビュー画像/,
+    const preview = createVisitorPreviews({ maxSide: 960 });
+    await expect(preview(file)).rejects.toThrow(/プレビュー画像/);
+  });
+
+  it("decodes at most two RAW previews at a time however many are asked for", async () => {
+    const { decode, release, state } = gatedDecoder();
+    const preview = createVisitorPreviews({
+      maxSide: 960,
+      decode,
+      orient: orienter().orient,
+      resize: sizedResize().resize,
+    });
+    const pending = Array.from({ length: 7 }, (_, index) =>
+      preview(rawPhoto(`photo-${index}.DNG`)),
     );
+    await flush();
+    expect(decode).toHaveBeenCalledTimes(2);
+    while (decode.mock.calls.length < 7 || state.active > 0) {
+      release();
+      await flush();
+    }
+    const blobs = await Promise.all(pending);
+    expect(blobs).toHaveLength(7);
+    expect(state.peak).toBe(2);
+  });
+
+  it("frees its place when a preview fails", async () => {
+    const decode = vi.fn(async () => {
+      throw new Error("decode failed");
+    });
+    const preview = createVisitorPreviews({ maxSide: 960, decode, concurrency: 1 });
+    const outcomes = await Promise.allSettled(
+      ["a.DNG", "b.DNG", "c.DNG"].map((name) => preview(rawPhoto(name))),
+    );
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([
+      "rejected",
+      "rejected",
+      "rejected",
+    ]);
+    expect(decode.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+class GatedFile extends File {
+  static readonly started = new Set<string>();
+  static readonly waiting: Array<() => void> = [];
+
+  static release(): void {
+    for (const next of GatedFile.waiting.splice(0)) {
+      next();
+    }
+  }
+
+  override slice(start?: number, end?: number, type?: string): Blob {
+    const inner = super.slice(start, end, type);
+    const name = this.name;
+    const gated = new Blob([inner], { type: inner.type });
+    const read = gated.arrayBuffer.bind(gated);
+    Object.defineProperty(gated, "arrayBuffer", {
+      value: async () => {
+        GatedFile.started.add(name);
+        await new Promise<void>((resolve) => GatedFile.waiting.push(resolve));
+        return read();
+      },
+    });
+    return gated;
+  }
+}
+
+function gatedRaw(name: string): File {
+  const dng = proRawLikeDng({ size: 3_000_000, rawAt: 1_000_000 });
+  return new GatedFile([dng.file.bytesAt(0, dng.file.size)], name);
+}
+
+describe("visitorPreviewBlob", () => {
+  it("returns ordinary photos unchanged", async () => {
+    const file = userFile(new Uint8Array([1, 2]), "a.jpg", "image/jpeg");
+    expect(await visitorPreviewBlob(file, 960)).toBe(file);
+  });
+
+  it("shares one small limit across every caller and size", async () => {
+    const names = ["a.DNG", "b.DNG", "c.DNG", "d.DNG", "e.DNG"];
+    const pending = names.map((name, index) =>
+      visitorPreviewBlob(gatedRaw(name), index % 2 === 0 ? 960 : 480).then(
+        () => "done",
+        () => "failed",
+      ),
+    );
+    await flush();
+    expect([...GatedFile.started].sort()).toEqual(["a.DNG", "b.DNG"]);
+    let settled = 0;
+    void Promise.all(pending).then(() => {
+      settled = names.length;
+    });
+    while (settled < names.length) {
+      GatedFile.release();
+      await flush();
+    }
+    expect(GatedFile.started.size).toBe(names.length);
   });
 });

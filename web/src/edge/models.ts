@@ -20,37 +20,93 @@ export const MODEL_ROUTE = "/models/";
 export const PART_BYTES = 200 * 1024 * 1024;
 
 const RELEASE = "v2.0.0";
+const BINARY = "application/octet-stream";
+const JSON_TYPE = "application/json; charset=utf-8";
+const MARKDOWN = "text/markdown; charset=utf-8";
+const PLAIN_TEXT = "text/plain; charset=utf-8";
+const WEIGHTS_CACHE = "public, max-age=31536000, immutable";
+const DOCUMENT_CACHE = "public, max-age=86400";
+const APACHE_LICENSE = "licenses/Apache-2.0.txt";
 
-function single(name: string): [string, readonly string[]] {
-  const key = `${RELEASE}/${name}`;
-  return [key, [key]];
+export interface PublishedFile {
+  readonly source: string;
+  readonly parts: readonly string[];
+  readonly contentType: string;
+  readonly cacheControl: string;
 }
 
-function split(name: string, parts: number): [string, readonly string[]] {
+function weights(name: string, contentType = BINARY): [string, PublishedFile] {
   const key = `${RELEASE}/${name}`;
-  return [key, Array.from({ length: parts }, (_, index) => `${key}.part${index}`)];
+  return [
+    key,
+    { source: name, parts: [key], contentType, cacheControl: WEIGHTS_CACHE },
+  ];
 }
 
-export const PUBLISHED: ReadonlyMap<string, readonly string[]> = new Map([
-  single("ensemble.json"),
-  single("convnext-base-224.onnx"),
+function split(name: string, parts: number): [string, PublishedFile] {
+  const key = `${RELEASE}/${name}`;
+  return [
+    key,
+    {
+      source: name,
+      parts: Array.from({ length: parts }, (_, index) => `${key}.part${index}`),
+      contentType: BINARY,
+      cacheControl: WEIGHTS_CACHE,
+    },
+  ];
+}
+
+function documentFile(
+  name: string,
+  contentType: string,
+  stored = name,
+): [string, PublishedFile] {
+  return [
+    `${RELEASE}/${name}`,
+    {
+      source: stored,
+      parts: [`${RELEASE}/${stored}`],
+      contentType,
+      cacheControl: DOCUMENT_CACHE,
+    },
+  ];
+}
+
+function upstreamCards(model: string): [string, PublishedFile][] {
+  return [
+    documentFile(`upstream/${model}/README.md`, MARKDOWN),
+    documentFile(`upstream/${model}/config.json`, JSON_TYPE),
+    documentFile(`upstream/${model}/provenance.json`, JSON_TYPE),
+  ];
+}
+
+export const PUBLISHED: ReadonlyMap<string, PublishedFile> = new Map([
+  weights("ensemble.json", JSON_TYPE),
+  weights("convnext-base-224.onnx"),
   split("convnext-base-224.onnx.data", 2),
-  single("convnext-small-288.onnx"),
-  single("convnext-small-288.onnx.data"),
-  single("convnext-small-224.onnx"),
-  single("convnext-small-224.onnx.data"),
+  weights("convnext-small-288.onnx"),
+  weights("convnext-small-288.onnx.data"),
+  weights("convnext-small-224.onnx"),
+  weights("convnext-small-224.onnx.data"),
+  documentFile("LICENSE", PLAIN_TEXT, APACHE_LICENSE),
+  documentFile(APACHE_LICENSE, PLAIN_TEXT),
+  documentFile("THIRD_PARTY_NOTICES.md", MARKDOWN),
+  documentFile("MODEL_CARD.md", MARKDOWN),
+  ...upstreamCards("convnext-base"),
+  ...upstreamCards("convnext-small"),
 ]);
 
-const CACHE_CONTROL = "public, max-age=31536000, immutable";
+export function publishedFile(name: string): PublishedFile | undefined {
+  return PUBLISHED.get(`${RELEASE}/${name}`);
+}
 
-function headersFor(key: string, size: number, etag: string): Headers {
+function headersFor(file: PublishedFile, size: number, etag: string): Headers {
   return new Headers({
-    "content-type": key.endsWith(".json")
-      ? "application/json; charset=utf-8"
-      : "application/octet-stream",
+    "content-type": file.contentType,
     "content-length": String(size),
     etag,
-    "cache-control": CACHE_CONTROL,
+    "cache-control": file.cacheControl,
+    "x-content-type-options": "nosniff",
   });
 }
 
@@ -118,17 +174,18 @@ export async function serveModel(
   const key = pathname.startsWith(MODEL_ROUTE)
     ? pathname.slice(MODEL_ROUTE.length)
     : "";
-  const parts = PUBLISHED.get(key);
-  if (!parts) {
+  const file = PUBLISHED.get(key);
+  if (!file) {
     return notFound();
   }
+  const { parts } = file;
   const ifNoneMatch = request.headers.get("if-none-match");
   if (request.method === "HEAD" || ifNoneMatch !== null || parts.length > 1) {
     const info = await describe(bucket, parts);
     if (!info) {
       return notFound();
     }
-    const headers = headersFor(key, info.size, info.etag);
+    const headers = headersFor(file, info.size, info.etag);
     if (request.method === "HEAD") {
       return new Response(null, { status: 200, headers });
     }
@@ -148,6 +205,6 @@ export async function serveModel(
   }
   return new Response(object.body, {
     status: 200,
-    headers: headersFor(key, object.size, object.httpEtag),
+    headers: headersFor(file, object.size, object.httpEtag),
   });
 }

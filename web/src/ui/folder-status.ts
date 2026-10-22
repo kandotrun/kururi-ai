@@ -7,10 +7,12 @@ const EMPTY_SHOWN_MS = 6000;
 
 export interface FolderStatusOptions {
   onCancel(): void;
+  heicLeftOut(progress: FolderProgress): number;
 }
 
 export interface FolderStatusView {
   readonly element: HTMLElement;
+  readonly live: HTMLElement;
   scanning(photos: number | null): void;
   report(progress: FolderProgress | null): void;
   empty(message: string): void;
@@ -21,10 +23,15 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
   const text = h("span", { class: "folder-status-text" });
   const cancel = h(
     "button",
-    { type: "button", class: "folder-cancel", hidden: true },
+    {
+      type: "button",
+      class: "folder-cancel",
+      hidden: true,
+      "aria-label": "フォルダの読み込みをやめる",
+    },
     ["やめる"],
   );
-  const spoken = h("span", {
+  const live = h("span", {
     class: "sr-only",
     role: "status",
     "aria-live": "polite",
@@ -32,7 +39,6 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
   const element = h("p", { class: "folder-status", hidden: true }, [
     h("span", { class: "folder-status-line", "aria-hidden": "true" }, [text]),
     cancel,
-    spoken,
   ]);
 
   let scan: number | null = null;
@@ -44,7 +50,11 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
   cancel.addEventListener("click", () => options.onCancel());
 
   function say(message: string): void {
-    setText(spoken, message);
+    setText(live, message);
+  }
+
+  function progressText(progress: FolderProgress): string {
+    return folderProgressText(progress, options.heicLeftOut(progress));
   }
 
   function render(): void {
@@ -63,7 +73,7 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
       return;
     }
     if (reported) {
-      setText(text, folderProgressText(reported));
+      setText(text, progressText(reported));
       element.hidden = false;
       element.dataset.state = reported.accepted > 0 ? "ready" : "empty";
       return;
@@ -84,6 +94,7 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
 
   return {
     element,
+    live,
     scanning(photos) {
       const started = scan === null && photos !== null;
       scan = photos;
@@ -115,7 +126,7 @@ export function createFolderStatus(options: FolderStatusOptions): FolderStatusVi
         reported.skipped !== progress.skipped;
       if (fresh) {
         reportedAt = performance.now();
-        say(folderProgressText(progress));
+        say(progressText(progress));
       }
       reported = progress;
       render();

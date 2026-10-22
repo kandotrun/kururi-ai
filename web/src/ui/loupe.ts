@@ -1,13 +1,14 @@
-import type { VisitorImages } from "./visitor-images";
+import type { VisitorImageLease, VisitorImages } from "./visitor-images";
 import type { PhotoRecord, Quarter, ScreenPoint } from "../contracts";
 import { expectedCorrection } from "../core/rotation";
 import {
-  creditText,
+  failureReason,
   judgementText,
   loupeRotation,
   photoPlace,
   verdictOf,
 } from "./copy";
+import { renderCredit } from "./credit";
 import { externalLink, h, setText } from "./dom";
 import { correctionPhrase, formatConfidence, formatMs } from "./format";
 import { placeLoupe } from "./loupe-geometry";
@@ -21,6 +22,7 @@ export interface LoupeOptions {
   sheet(): boolean;
   reserveTop(): number;
   reserveBottom(): number;
+  reserveRight(): number;
 }
 
 export interface LoupeView {
@@ -86,6 +88,7 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     timingFact,
   ]);
   const verdict = h("p", { class: "verdict slip-verdict" });
+  const reason = h("p", { class: "slip-reason", hidden: true });
   const credit = h("p", { class: "slip-credit" });
   const odds = QUARTERS.map(oddsRow);
   const oddsTable = h("table", { class: "odds" }, [
@@ -108,6 +111,7 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     title,
     facts,
     verdict,
+    reason,
     credit,
     extras,
   ]);
@@ -133,6 +137,7 @@ export function createLoupe(options: LoupeOptions): LoupeView {
   let photoId: string | null = null;
   let photoUrl: string | null = null;
   let photoToken = 0;
+  let photoLease: VisitorImageLease | null = null;
   let returnFocus: HTMLElement | null = null;
 
   close.addEventListener("click", () => options.onClose());
@@ -149,8 +154,14 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     photo.style.setProperty("--aspect", safe.toFixed(4));
   }
 
+  function releasePhoto(): void {
+    photoLease?.release();
+    photoLease = null;
+  }
+
   function setPhoto(record: PhotoRecord, pinned: boolean): void {
     if (record.id !== photoId) {
+      releasePhoto();
       photoId = record.id;
       photoUrl = null;
       photoToken += 1;
@@ -160,15 +171,19 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     }
     const { file } = record.source;
     if (file) {
-      const id = record.id;
-      options.images.url(file).then(
+      if (photoLease) {
+        return;
+      }
+      const lease = options.images.acquire(file);
+      photoLease = lease;
+      lease.url.then(
         (url) => {
-          if (photoId === id) {
+          if (photoLease === lease) {
             showPhoto(url);
           }
         },
         () => {
-          if (photoId === id) {
+          if (photoLease === lease) {
             photo.dataset.ready = "failed";
           }
         },
@@ -285,6 +300,7 @@ export function createLoupe(options: LoupeOptions): LoupeView {
         lift: mode === "pinned" ? 120 : 110,
         reserveTop: options.reserveTop(),
         reserveBottom: options.reserveBottom(),
+        reserveRight: mode === "pinned" ? options.reserveRight() : 0,
       },
     );
     element.dataset.side = placement.side;
@@ -320,7 +336,10 @@ export function createLoupe(options: LoupeOptions): LoupeView {
       record.prediction ? `${formatMs(record.prediction.inferenceMs)} ms` : "",
     );
     renderVerdict(verdict, verdictOf(record));
-    setText(credit, creditText(record.source));
+    const failed = failureReason(record);
+    reason.hidden = failed === null;
+    setText(reason, failed ?? "");
+    renderCredit(credit, record.source, false);
     extras.hidden = !pinned;
     if (pinned) {
       renderOdds(record);
@@ -347,6 +366,7 @@ export function createLoupe(options: LoupeOptions): LoupeView {
     photoId = null;
     photoUrl = null;
     photoToken += 1;
+    releasePhoto();
   }
 
   return {

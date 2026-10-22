@@ -198,3 +198,48 @@ export async function downloadAssets(
   });
   return result;
 }
+
+async function holds(
+  cache: AssetCache,
+  url: string,
+  asset: EnsembleAsset,
+): Promise<boolean> {
+  const found = await cache.match(url);
+  if (!found) {
+    return false;
+  }
+  await found.body?.cancel().catch(() => {});
+  const length = found.headers.get("content-length");
+  return length === null || Number(length) === asset.bytes;
+}
+
+export async function prefetchAssets(
+  assets: readonly EnsembleAsset[],
+  baseUrl: string,
+  deps: DownloadDeps,
+): Promise<Map<string, AssetBytes> | null> {
+  const cache = deps.cache;
+  if (cache === null || !cache.writable) {
+    return (await downloadAssets(assets, baseUrl, deps, null)).files;
+  }
+  const missing: EnsembleAsset[] = [];
+  for (const asset of assets) {
+    if (!(await holds(cache, new URL(asset.file, baseUrl).href, asset))) {
+      missing.push(asset);
+    }
+  }
+  if (missing.length === 0) {
+    return null;
+  }
+  const fetched = await downloadAssets(missing, baseUrl, deps, null);
+  const kept = new Set([...fetched.stored, ...fetched.fromCache]);
+  if (missing.every((asset) => kept.has(asset.file))) {
+    return null;
+  }
+  const rest = assets.filter((asset) => !missing.includes(asset));
+  const others =
+    rest.length === 0
+      ? new Map<string, AssetBytes>()
+      : (await downloadAssets(rest, baseUrl, deps, null)).files;
+  return new Map([...others, ...fetched.files]);
+}

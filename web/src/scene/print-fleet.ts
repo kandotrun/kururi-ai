@@ -249,6 +249,10 @@ export class PrintFleet {
     this.finishAll();
   }
 
+  markRestored(): void {
+    this.lost = false;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.finishAll();

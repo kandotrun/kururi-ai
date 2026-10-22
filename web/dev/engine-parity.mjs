@@ -1,10 +1,11 @@
 import { chromium } from "@playwright/test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createServer } from "node:http";
+import { relative, resolve } from "node:path";
 
 const scratch = process.argv[2];
 const mode = process.argv[3] ?? "all";
-const origin = "http://127.0.0.1:5173";
+const origin = process.env.ENGINE_ORIGIN ?? "http://127.0.0.1:5173";
 const baseUrl = `${origin}/full-local/`;
 const wasmBaseUrl = process.env.ENGINE_WASM_BASE ?? `${origin}/node_modules/onnxruntime-web/dist/`;
 const reference = JSON.parse(await readFile(resolve(scratch, "reference.json"), "utf8"));
@@ -21,14 +22,24 @@ context.on("request", (request) => {
     networkHits.push(request.url().split("/").at(-1));
   }
 });
-await context.route(`${origin}/engine-data/**`, async (route) => {
-  const path = new URL(route.request().url()).pathname.replace("/engine-data/", "");
+const dataServer = createServer(async (request, response) => {
+  const path = resolve(scratch, decodeURIComponent(new URL(request.url ?? "/", "http://data").pathname.slice(1)));
+  const inside = relative(scratch, path);
+  if (inside.startsWith("..") || inside === "") {
+    response.writeHead(404).end();
+    return;
+  }
   try {
-    await route.fulfill({ status: 200, body: await readFile(resolve(scratch, path)) });
+    const body = await readFile(path);
+    response.writeHead(200, { "access-control-allow-origin": "*", "content-length": body.length });
+    response.end(body);
   } catch {
-    await route.fulfill({ status: 404, body: "missing" });
+    response.writeHead(404, { "access-control-allow-origin": "*" }).end("missing");
   }
 });
+await new Promise((done) => dataServer.listen(0, "127.0.0.1", done));
+const dataOrigin = `http://127.0.0.1:${dataServer.address().port}`;
+await context.routeWebSocket((url) => url.host === new URL(origin).host, () => {});
 const page = await context.newPage();
 page.on("console", (message) => {
   if (message.type() === "error" || message.type() === "warning") {
@@ -36,6 +47,10 @@ page.on("console", (message) => {
   }
 });
 page.on("pageerror", (error) => console.log("[pageerror]", String(error).slice(0, 400)));
+page.on("crash", () => console.log("[page crash]"));
+page.on("framenavigated", (frame) => {
+  if (frame === page.mainFrame()) console.log("[navigated]", frame.url());
+});
 
 async function ready() {
   await page.goto(`${origin}/dev/engine-parity.html`);
@@ -78,7 +93,7 @@ async function call(method, ...args) {
 function fileUrl(source) {
   return source.kind === "sample"
     ? `${origin}/samples/${source.path.split("/").at(-1)}`
-    : `${origin}/engine-data/thumbs/${source.path.split("/").at(-1)}`;
+    : `${dataOrigin}/thumbs/${source.path.split("/").at(-1)}`;
 }
 
 function median(values) {
@@ -189,14 +204,14 @@ if (mode === "all" || mode === "probe") {
   let fallbackLoadMs = null;
   for (const source of reference.sources) {
     for (let simulated = 0; simulated < 4; simulated += 1) {
-      const referenceUrl = simulated === 0 ? `${origin}/engine-data/rgb/${source.id}.rgb` : null;
+      const referenceUrl = simulated === 0 ? `${dataOrigin}/rgb/${source.id}.rgb` : null;
       const fileOutcome = await call("probeFile", "probe", fileUrl(source), simulated * 90, referenceUrl);
       const expected = reference.cases.find((entry) => entry.id === source.id && entry.simulated === simulated);
       if (fallbackLoadMs === null && fileOutcome.detail?.fallbackUsed) {
         fallbackLoadMs = fileOutcome.detail.engineMs;
       }
       fileCases.push({ id: source.id, kind: source.kind, simulated, ...fileOutcome, firstFallback: fallbackLoadMs !== null && fileCases.every((item) => !item.detail?.fallbackUsed) && fileOutcome.detail?.fallbackUsed });
-      const rgbOutcome = await call("probeRgb", "probe", `${origin}/engine-data/rgb/${source.id}.rgb`, source.width, source.height, simulated * 90);
+      const rgbOutcome = await call("probeRgb", "probe", `${dataOrigin}/rgb/${source.id}.rgb`, source.width, source.height, simulated * 90);
       rgbCases.push({ id: source.id, kind: source.kind, simulated, ...rgbOutcome });
       if (!fileOutcome.result || fileOutcome.result.type !== "result" || !rgbOutcome.result || rgbOutcome.result.type !== "result") {
         console.log("failure", source.id, simulated, JSON.stringify(fileOutcome.result), JSON.stringify(rgbOutcome.result));
@@ -246,3 +261,4 @@ if (mode === "all" || mode === "probe") {
 
 await writeFile(resolve(scratch, `parity-report-${mode}.json`), JSON.stringify(report, null, 1));
 await context.close();
+dataServer.close();

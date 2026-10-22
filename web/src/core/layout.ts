@@ -84,6 +84,7 @@ export const ARRIVAL_PITCH = 54 * DEG;
 export const ARRIVAL_WIDTH = 3;
 export const ARRIVAL_DEPTH = 3;
 export const MIN_FREE_FRACTION = 0.3;
+export const ARRIVAL_OMEGA = 1.35;
 
 const MIN_ASPECT = 0.25;
 const MAX_ASPECT = 4;
@@ -352,6 +353,38 @@ export function viewFrame(
     cameraFovY,
     shiftX: (left - right) / 2 / width,
     shiftY: (top - bottom) / 2 / height,
+  };
+}
+
+export interface ArrivalFrame {
+  view: CameraView;
+  fovY: number;
+  shiftX: number;
+  shiftY: number;
+}
+
+export function arrivalFrame(
+  viewWidth: number,
+  viewHeight: number,
+  insets: ViewInsets,
+): ArrivalFrame {
+  const frame = viewFrame(viewWidth, viewHeight, insets);
+  return {
+    view: frameArea(
+      {
+        minX: -ARRIVAL_WIDTH / 2,
+        maxX: ARRIVAL_WIDTH / 2,
+        minZ: -ARRIVAL_DEPTH / 2,
+        maxZ: ARRIVAL_DEPTH / 2,
+      },
+      ARRIVAL_PITCH,
+      DESK_YAW,
+      frame.fovY,
+      frame.aspect,
+    ),
+    fovY: frame.cameraFovY,
+    shiftX: frame.shiftX,
+    shiftY: frame.shiftY,
   };
 }
 

@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "ast-grep test --skip-snapshot-tests && ast-grep scan --error",
     "test:unit": "vitest run",
-    "build": "node scripts/copy-assets.mjs && tsc --noEmit && vite build",
+    "build": "node scripts/copy-assets.mjs && tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "pretest": "npm run assets",
